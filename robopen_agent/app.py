@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import os
+import re
+from datetime import datetime, timezone
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+from .codex_runner import run_codex
+from .memory_store import MemoryStore, TaskRow
+from .schedule_intent_parser import parse_schedule_intent_with_ai
+from .scheduler import Scheduler
+
+
+Reply = Callable[[str], None]
+
+
+def required(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def create_app() -> App:
+    load_dotenv()
+    memory_store = MemoryStore(os.environ.get("SQLITE_PATH", "data/agent.db"))
+
+    app = App(
+        token=required("SLACK_BOT_TOKEN"),
+        process_before_response=True,
+        token_verification_enabled=False,
+    )
+
+    def run_scheduled_task(task: TaskRow) -> None:
+        result = run_codex(task.prompt or task.title)
+        memory_store.mark_task_run(task.id)
+        if task.run_at:
+            memory_store.complete_task(task.id)
+
+        channel = task.notify_channel or os.environ.get("SLACK_LOG_CHANNEL")
+        if not channel:
+            print(f"[scheduler] SLACK_LOG_CHANNEL is not configured. Task #{task.id} result skipped.")
+            return
+        app.client.chat_postMessage(
+            channel=channel,
+            text=f":spiral_calendar_pad: *Scheduled Task:* {task.title}\n\n{result.text}",
+        )
+
+    scheduler = Scheduler(run_scheduled_task)
+
+    @app.event("app_mention")
+    def handle_app_mention(event: dict[str, Any], say: Callable[..., Any]) -> None:
+        thread_ts = event.get("thread_ts") or event.get("ts")
+
+        def reply(text: str) -> None:
+            say(text=text, thread_ts=thread_ts)
+
+        handle_prompt(
+            prompt=event.get("text"),
+            reply=reply,
+            memory_store=memory_store,
+            scheduler=scheduler,
+            user=event.get("user"),
+            thread_ts=thread_ts,
+        )
+
+    @app.message(re.compile(".*", re.DOTALL))
+    def handle_message(message: dict[str, Any], say: Callable[..., Any]) -> None:
+        if message.get("subtype") or message.get("bot_id"):
+            return
+
+        is_direct_message = message.get("channel_type") == "im"
+        text = message.get("text")
+        is_mention = isinstance(text, str) and "<@" in text
+
+        if not is_direct_message:
+            if is_mention:
+                return
+            if not message.get("thread_ts"):
+                return
+            tracked = memory_store.find_conversation_by_thread(message["thread_ts"])
+            if not tracked:
+                return
+
+        thread_ts = message.get("thread_ts") or message.get("ts")
+        reply_thread_ts = None if is_direct_message else thread_ts
+
+        def reply(text: str) -> None:
+            if reply_thread_ts:
+                say(text=text, thread_ts=reply_thread_ts)
+            else:
+                say(text=text)
+
+        handle_prompt(
+            prompt=text,
+            reply=reply,
+            memory_store=memory_store,
+            scheduler=scheduler,
+            user=message.get("user"),
+            thread_ts=thread_ts,
+        )
+
+    app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
+    app.client.robopen_scheduler = scheduler  # type: ignore[attr-defined]
+    return app
+
+
+def handle_prompt(
+    *,
+    prompt: str | None,
+    reply: Reply,
+    memory_store: MemoryStore,
+    scheduler: Scheduler,
+    user: str | None = None,
+    thread_ts: str | None = None,
+) -> None:
+    trimmed = (prompt or "").strip()
+    if not trimmed:
+        reply("入力が空です。メッセージを送ってください。")
+        return
+
+    ai_intent = None
+    if looks_like_schedule_intent(trimmed):
+        try:
+            ai_intent = parse_schedule_intent_with_ai(trimmed)
+        except Exception:
+            ai_intent = None
+
+    if ai_intent:
+        if ai_intent.kind == "cron":
+            task = memory_store.create_task(
+                title=ai_intent.title,
+                prompt=ai_intent.prompt,
+                schedule_cron=ai_intent.schedule_cron,
+            )
+        else:
+            task = memory_store.create_task(
+                title=ai_intent.title,
+                prompt=ai_intent.prompt,
+                run_at=ai_intent.run_at,
+            )
+        scheduler.schedule(task)
+        reply(build_task_registered_message(task))
+        return
+
+    if trimmed.startswith("schedule cron "):
+        parsed = parse_cron_command(trimmed.removeprefix("schedule cron "))
+        task = memory_store.create_task(**parsed)
+        scheduler.schedule(task)
+        reply(build_task_registered_message(task))
+        return
+
+    if trimmed.startswith("schedule once "):
+        parsed = parse_one_shot_command(trimmed.removeprefix("schedule once "))
+        task = memory_store.create_task(**parsed)
+        scheduler.schedule(task)
+        reply(build_task_registered_message(task))
+        return
+
+    conversation = memory_store.get_or_create_conversation(thread_ts or f"local-{datetime.now().timestamp()}")
+    memory_store.append_message(conversation.id, "user", trimmed)
+    reply("処理中です...")
+
+    try:
+        result = run_codex(trimmed, conversation.codex_rollout_id)
+        if result.session_id and result.session_id != conversation.codex_rollout_id:
+            memory_store.set_codex_rollout_id(conversation.id, result.session_id)
+        memory_store.append_message(conversation.id, "assistant", result.text)
+        user_prefix = f"<@{user}> " if user else ""
+        reply(f"{user_prefix}{result.text}")
+    except Exception as exc:
+        reply(f"Codex実行でエラーが発生しました: {exc}")
+
+
+def build_task_registered_message(task: TaskRow) -> str:
+    schedule = format_schedule_for_jst(task.schedule_cron, task.run_at)
+    return f"タスクが登録できました: #{task.id} {task.title} ({schedule})"
+
+
+def format_schedule_for_jst(schedule_cron: str | None, run_at: str | None) -> str:
+    if run_at:
+        parsed = _parse_iso_datetime(run_at)
+        if parsed:
+            jst = parsed.astimezone(ZoneInfo("Asia/Tokyo"))
+            return f"{jst:%Y/%m/%d %H:%M:%S} JST"
+
+    if schedule_cron:
+        converted = convert_cron_utc_to_jst_label(schedule_cron)
+        return converted or f"cron: {schedule_cron} (UTC基準)"
+
+    return "時刻未設定"
+
+
+def convert_cron_utc_to_jst_label(cron: str) -> str | None:
+    parts = cron.strip().split()
+    if len(parts) != 5:
+        return None
+    minute, hour, day_of_month, month, day_of_week = parts
+    if not minute.isdigit() or not hour.isdigit():
+        return None
+    base = datetime(2026, 1, 1, int(hour), int(minute), tzinfo=timezone.utc)
+    jst = base.astimezone(ZoneInfo("Asia/Tokyo"))
+    return f"毎日 {jst:%H:%M} JST (cron: {minute} {hour} {day_of_month} {month} {day_of_week} UTC)"
+
+
+def looks_like_schedule_intent(text: str) -> bool:
+    return any(hint in text for hint in ["毎", "明日", "明後日", "時", "分", "schedule", "cron", "once", "定期", "実行"])
+
+
+def parse_cron_command(raw: str) -> dict[str, str]:
+    title, schedule_cron, prompt = _parse_pipe_command(raw, "形式: schedule cron <title> | <m h * * d> | <prompt>")
+    return {"title": title, "schedule_cron": schedule_cron, "prompt": prompt}
+
+
+def parse_one_shot_command(raw: str) -> dict[str, str]:
+    title, run_at, prompt = _parse_pipe_command(raw, "形式: schedule once <title> | <ISO8601 UTC> | <prompt>")
+    return {"title": title, "run_at": run_at, "prompt": prompt}
+
+
+def _parse_pipe_command(raw: str, error_message: str) -> tuple[str, str, str]:
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) < 3 or not parts[0] or not parts[1] or not parts[2]:
+        raise ValueError(error_message)
+    return parts[0], parts[1], " | ".join(parts[2:])
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def main() -> None:
+    app = create_app()
+    scheduler = app.client.robopen_scheduler  # type: ignore[attr-defined]
+    memory_store = app.client.robopen_memory_store  # type: ignore[attr-defined]
+    scheduler.restore(memory_store.list_active_tasks())
+    SocketModeHandler(app, required("SLACK_APP_TOKEN")).start()

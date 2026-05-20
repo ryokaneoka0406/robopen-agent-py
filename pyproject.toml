@@ -1,0 +1,29 @@
+[project]
+name = "robopen-agent-py"
+version = "0.1.0"
+description = "Slack-connected personal agent wrapper around Codex CLI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.1.0",
+    "slack-bolt>=1.22.0",
+]
+
+[project.scripts]
+robopen-agent = "robopen_agent.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=80.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["robopen_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

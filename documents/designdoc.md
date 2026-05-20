@@ -1,0 +1,153 @@
+# Design Doc: 自分用パーソナルエージェント
+
+## 1. 概要
+
+Codex CLIをコアの推論／実行エンジンとしてラップし、Slackから自然言語で指示できる個人専用のパーソナルエージェントを構築する。VPS上に常駐させ、対話・スケジュール起動・長期記憶の3軸でユーザーの作業を伴走することを目的とする。
+
+## 2. 目的とゴール
+
+- Slack上でテキストを送るだけで、Codex CLIの能力（コード実行、ファイル操作、外部API呼び出しなど）を呼び出せる状態を作る。
+- cron的なスケジュール起動と、Slack経由のadhoc起動の両方をサポートする。
+- 会話・タスク履歴・好みなどをSQLiteに永続化し、セッションを跨いだ文脈保持を行う。
+- 破壊的操作（削除系）のみ人間の確認を挟み、それ以外は原則として自律実行する。
+- 人格や行動規約はAGENTS.mdとしてリポジトリ内に集約し、変更履歴を追える形で管理する。
+
+## 3. 非ゴール
+
+- マルチユーザー対応（当面は自分1人専用）。
+- 複数LLMプロバイダ／ローカルLLMへの抽象化（Codex CLIに固定）。
+- リッチなWeb UI（操作面はSlackとCLIに限定）。
+
+## 4. アーキテクチャ概要
+
+```mermaid
+flowchart LR
+    User["ryo (Slack)"] -->|DM / mention| SlackAPI["Slack Events API"]
+    SlackAPI --> Wrapper["Wrapper Layer (Python)"]
+    Scheduler["Scheduler (cron / one-shot)"] --> Wrapper
+    Wrapper --> Memory[("SQLite Memory")]
+    Wrapper --> Codex["Codex CLI Process"]
+    Codex --> Tools["Skills / Tools (shell, fs, http, etc.)"]
+    Codex --> Wrapper
+    Wrapper -->|reply| SlackAPI
+```
+
+## 5. コンポーネント
+
+### 5.1 Wrapper Layer
+
+- 役割: Slackイベント受信、スケジューラ起動、Codex CLIの子プロセス管理、メモリ読み書き、確認フロー制御。
+- 実装言語: Python。パッケージ管理と仮想環境は `uv` に統一し、`.env` は `python-dotenv` で読み込む。
+- 主なモジュール
+  - slack_gateway: Slack Events API (Socket Mode)から入力を受け、出力を整形して返す。
+  - session_manager: Slackスレッド（slack_thread_ts）単位でCodex CLIのセッション（rollout）を1対1に対応付ける。スレッド初回はcodexを新規起動し、以降は `codex resume <rollout_id>` で再開する。コンテキスト消費が閾値を超えた場合は、要約を生成したうえで新しいrolloutへロールオーバーする。
+  - codex_runner: Codex CLIをサブプロセスとして起動し、stdin/stdoutでやりとりする。新規セッションと `codex resume` を呼び分け、一定時間アイドルになったらプロセスを終了してメモリリークの蓄積を抑える。
+  - approval_guard: 削除系コマンドを検出した際にSlackで確認ボタンを出して承認を待つ。
+  - memory_store: SQLiteに会話・タスク・好みを保存／検索する。
+  - scheduler: 定期実行ジョブを管理し、Wrapperにイベントを流す。
+
+### 5.2 Codex CLI 層
+
+- AGENTS.mdに人格、口調、安全規約、よく使うショートカットを記述する。
+- Skillsはリポジトリ内のscripts/ディレクトリに配置し、Codex CLIから呼び出せる形にしておく。
+- 「スキルを作るスキル」をひとつ用意し、新しいskillの雛形生成・登録までを自動化する。
+
+### 5.3 メモリ層 (SQLite)
+
+概略スキーマ:
+
+| テーブル | 主なカラム | 用途 |
+| --- | --- | --- |
+| conversations | id, slack_thread_ts, codex_rollout_id, parent_conversation_id, started_at, summary, token_usage_estimate, last_active_at | Slackスレッド単位の会話メタデータ。1スレッド＝1 conversationを基本とし、ロールオーバー時は新しいレコードを作成してparent_conversation_idで連結する |
+| messages | id, conversation_id, role, content, created_at | 会話ログ |
+| tasks | id, title, schedule_cron, last_run_at, status | 定期タスク／予約タスク |
+| preferences | key, value, updated_at | 口調や承認ポリシーなどの長期設定 |
+| audit_logs | id, action, target, approved_by, created_at | 削除系などの操作履歴 |
+
+要約や長期記憶は、conversationsテーブルのsummaryカラムにCodex CLI自身が定期的に圧縮して書き戻す方式とする。要約トリガは以下を併用する。
+
+- トークン使用量ベース: rolloutのコンテキスト消費が60%を超えたら自動要約し、新しいrolloutへロールオーバーする。要約は新rolloutの冒頭にシステムメッセージとして注入する。
+- アイドル時間ベース: スレッド最終発言から24時間無発言が続いた場合に自動要約し、長期記憶として固定化する。
+- 明示要求ベース: ユーザーが「ここまでをまとめて」と指示した場合、その時点でスナップショット要約を作成する。
+
+スレッド横断の長期記憶（口調・好み・恒久ルール）はpreferencesテーブルへ書き出し、新規rolloutの起動時に必ずシステムプロンプトへ反映する。
+
+### 5.4 Scheduler
+
+- xangiのスケジューリング実装を参考にしつつ、cron式とone-shot実行の両方を扱う。
+- Wrapperプロセス内のジョブキューとして動かし、起動時にtasksテーブルから登録済みジョブを復元する。
+- 実行結果はSlackの所定チャンネル（例: #agent-log）に通知する。
+- **更新 (2026-05-10)**: ユーザー入力はルールベースの固定コマンドだけでなく、自然文（例:「毎朝9時に実行して」）からも登録できるようにする。
+  - `schedule_intent_parser` を追加し、LLMで「時点指定（cron/one-shot）」と「実行タスク本文」を抽出する。
+  - 抽出結果は構造化JSON（kind/title/prompt/scheduleCron/runAt/confidence）で受け取り、confidence閾値未満は通常会話として扱う。
+  - タイムゾーン解釈は原則UTC保存とし、将来的にユーザーごとのtimezone preferenceを適用する。
+  - **更新 (2026-05-12)**: 保存はUTCのまま維持し、ユーザーへの登録完了メッセージではJSTへ変換して表示する。
+
+### 5.5 Slack 連携
+
+- Socket Modeでアウトバウンド接続のみとし、VPSのポート開放を不要にする。
+- DMとメンションをトリガとして受け付ける。
+- 削除系の確認はinteractive message (Block Kit) のApprove / Denyボタンで行う。
+
+## 6. 主要フロー
+
+### 6.1 Slack経由のadhocリクエスト
+
+1. ユーザーがSlackでメンションまたはDMを送る。
+2. slack_gatewayがイベントを受信し、session_managerに渡す。
+3. session_managerはslack_thread_tsに紐づくconversationsレコードを参照し、codex_rollout_idがあれば `codex resume <rollout_id>` で再開、なければ新規にcodexセッションを起動する。最新の要約とpreferencesは冒頭のシステムメッセージとして渡す。
+4. codex_runnerがCodex CLIにユーザーメッセージを渡し、ストリーミング出力をSlackに返す。完了時にrollout_idとトークン使用量をconversationsへ書き戻し、コンテキスト消費が閾値を超えていれば次回以降のロールオーバーをスケジュールする。
+5. 出力中に削除系コマンド（rm, DROP, deleteなど）を検出した場合、approval_guardが介入してユーザーに確認する。
+6. 完了後、messagesとaudit_logsを更新する。
+
+### 6.2 スケジュール起動
+
+1. schedulerがtasksの実行時刻を検知する。
+2. Wrapperが対応するプロンプトを組み立て、Codex CLIに投げる。
+3. 結果をSlackの通知チャンネルに送り、必要ならフォローアップスレッドを開く。
+
+### 6.3 スキル追加
+
+1. ユーザーが「新しいskillを作って」と依頼する。
+2. Codex CLIが「スキルを作るスキル」を起動し、scripts/配下にテンプレートを生成する。
+3. AGENTS.mdにskillの説明を追記し、コミットする。
+
+## 7. セキュリティと安全策
+
+- 削除系コマンド、外部送金、外部APIの破壊的操作はすべてapproval_guardで確認を取る。
+- 承認待ちのアクションはタイムアウト（例: 10分）で自動キャンセルする。
+- VPSへのSSHは公開鍵のみ、Slack Bot Tokenとシークレットはdotenvで管理し、リポジトリには含めない。
+- audit_logsを別ファイルにもJSON Lines形式でローテーション保存する。
+- Codex CLIの5時間ローリング上限と週次クォータを `/status` 相当の手段で定期取得し、残量が閾値（例: 残10%）を割ったらスケジュール起動タスクを自動でスキップ・先延ばしする。
+- codex関連プロセスはsystemdのMemoryMax/MemoryHighでメモリ上限を設け、超過時は自動再起動する。長時間稼働によるメモリリーク蓄積を抑えるため、日次の定期再起動も併用する。
+
+## 8. デプロイ
+
+- VPS (Ubuntu想定) にdocker-compose一式で配置する。
+- コンテナ構成: wrapper, codex-cli (sidecar), sqlite (volume mount)。
+- systemdで再起動を保証し、ログはjournald経由で集約する。
+- バックアップはSQLiteファイルを日次でオブジェクトストレージへ転送する。
+
+## 9. 段階的マイルストン
+
+| フェーズ | スコープ | 完了条件 |
+| --- | --- | --- |
+| M0 PoC | ローカルでSlack DMからCodex CLIを叩いて返す | 1往復の対話が成立する |
+| M1 永続化 | SQLiteに会話履歴を保存し、スレッド単位で文脈を維持 | 過去の発言を参照した応答ができる |
+| M2 スケジューラ | cron式タスクの登録・実行・通知 | 毎朝の要約タスクが自動投稿される |
+| M3 確認フロー | 削除系コマンドのapproval_guardを組み込む | rm系操作で必ず確認が走る |
+| M4 VPS常駐 | VPSにdocker-composeで本番デプロイ | 24時間稼働とログ監視ができる |
+| M5 スキル拡張 | 「スキルを作るスキル」と最初の実用skill 2〜3本 | 会話からskillが追加できる |
+
+## 10. 未決事項
+
+- 起動オーバーヘッド（初期化トークン消費とレイテンシ）の実測値が想定より大きかった場合、`codex mcp-server` モードへ常駐させる構成へ移行するかの判断基準。最初の1週間で「初期化トークン量」「平均応答レイテンシ」「1日あたり総トークン消費」の3指標を計測したうえで判断する。
+- 要約ロールオーバーの閾値（暫定60%）と、要約プロンプトのフォーマットの最適化。要約品質はスレッド再開時の応答整合性で評価する。
+- ロールオーバー後の旧rolloutのアーカイブ方針（削除するか、検索可能なまま残すか）。
+- Slack以外の入口（Notionコメントやメール）を将来的に増やすかどうか。
+- ai-assistant-workspaceの人格テンプレートをそのまま流用するか、AGENTS.mdを独自設計にするか。
+
+## 11. 参考
+
+- xangi: Slack疎通とスケジューリングの実装を参照。
+- ai-assistant-workspace: 人格設計とメモリ戦略、スキル生成の考え方を参照。
