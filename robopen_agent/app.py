@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -29,10 +30,11 @@ def required(name: str) -> str:
 def create_app() -> App:
     load_dotenv()
     memory_store = MemoryStore(os.environ.get("SQLITE_PATH", "data/agent.db"))
+    seen_events: dict[str, float] = {}
 
     app = App(
         token=required("SLACK_BOT_TOKEN"),
-        process_before_response=True,
+        process_before_response=False,
         token_verification_enabled=False,
     )
 
@@ -54,8 +56,11 @@ def create_app() -> App:
     scheduler = Scheduler(run_scheduled_task)
 
     @app.event("app_mention")
-    def handle_app_mention(event: dict[str, Any], say: Callable[..., Any]) -> None:
+    def handle_app_mention(event: dict[str, Any], body: dict[str, Any], say: Callable[..., Any]) -> None:
+        if is_duplicate_event(body, seen_events):
+            return
         thread_ts = event.get("thread_ts") or event.get("ts")
+        conversation_key = build_conversation_key(event.get("channel"), thread_ts)
 
         def reply(text: str) -> None:
             say(text=text, thread_ts=thread_ts)
@@ -66,29 +71,34 @@ def create_app() -> App:
             memory_store=memory_store,
             scheduler=scheduler,
             user=event.get("user"),
-            thread_ts=thread_ts,
+            conversation_key=conversation_key,
         )
 
     @app.message(re.compile(".*", re.DOTALL))
-    def handle_message(message: dict[str, Any], say: Callable[..., Any]) -> None:
+    def handle_message(message: dict[str, Any], body: dict[str, Any], say: Callable[..., Any]) -> None:
+        if is_duplicate_event(body, seen_events):
+            return
         if message.get("subtype") or message.get("bot_id"):
             return
 
         is_direct_message = message.get("channel_type") == "im"
         text = message.get("text")
         is_mention = isinstance(text, str) and "<@" in text
+        if is_mention and not is_direct_message:
+            return
 
         if not is_direct_message:
-            if is_mention:
-                return
             if not message.get("thread_ts"):
                 return
-            tracked = memory_store.find_conversation_by_thread(message["thread_ts"])
+            tracked = memory_store.find_conversation_by_thread(
+                build_conversation_key(message.get("channel"), message["thread_ts"])
+            )
             if not tracked:
                 return
 
         thread_ts = message.get("thread_ts") or message.get("ts")
         reply_thread_ts = None if is_direct_message else thread_ts
+        conversation_key = build_conversation_key(message.get("channel"), thread_ts)
 
         def reply(text: str) -> None:
             if reply_thread_ts:
@@ -102,7 +112,7 @@ def create_app() -> App:
             memory_store=memory_store,
             scheduler=scheduler,
             user=message.get("user"),
-            thread_ts=thread_ts,
+            conversation_key=conversation_key,
         )
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
@@ -117,7 +127,7 @@ def handle_prompt(
     memory_store: MemoryStore,
     scheduler: Scheduler,
     user: str | None = None,
-    thread_ts: str | None = None,
+    conversation_key: str | None = None,
 ) -> None:
     trimmed = (prompt or "").strip()
     if not trimmed:
@@ -162,7 +172,7 @@ def handle_prompt(
         reply(build_task_registered_message(task))
         return
 
-    conversation = memory_store.get_or_create_conversation(thread_ts or f"local-{datetime.now().timestamp()}")
+    conversation = memory_store.get_or_create_conversation(conversation_key or f"local-{datetime.now().timestamp()}")
     memory_store.append_message(conversation.id, "user", trimmed)
     reply("処理中です...")
 
@@ -210,6 +220,28 @@ def convert_cron_utc_to_jst_label(cron: str) -> str | None:
 
 def looks_like_schedule_intent(text: str) -> bool:
     return any(hint in text for hint in ["毎", "明日", "明後日", "時", "分", "schedule", "cron", "once", "定期", "実行"])
+
+
+def build_conversation_key(channel: str | None, thread_ts: str | None) -> str:
+    if channel and thread_ts:
+        return f"{channel}:{thread_ts}"
+    return thread_ts or f"local-{datetime.now().timestamp()}"
+
+
+def is_duplicate_event(body: dict[str, Any], seen_events: dict[str, float], ttl_seconds: int = 300) -> bool:
+    event_id = body.get("event_id")
+    if not isinstance(event_id, str) or not event_id:
+        return False
+
+    now = time.monotonic()
+    expired = [key for key, seen_at in seen_events.items() if now - seen_at > ttl_seconds]
+    for key in expired:
+        del seen_events[key]
+
+    if event_id in seen_events:
+        return True
+    seen_events[event_id] = now
+    return False
 
 
 def parse_cron_command(raw: str) -> dict[str, str]:

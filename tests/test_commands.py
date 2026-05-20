@@ -1,8 +1,10 @@
 import pytest
 
 from robopen_agent.app import (
+    build_conversation_key,
     convert_cron_utc_to_jst_label,
     format_schedule_for_jst,
+    is_duplicate_event,
     parse_cron_command,
     parse_one_shot_command,
 )
@@ -36,3 +38,15 @@ def test_format_schedule_for_jst():
 def test_convert_cron_utc_to_jst_label():
     assert convert_cron_utc_to_jst_label("0 0 * * *") == "毎日 09:00 JST (cron: 0 0 * * * UTC)"
 
+
+def test_build_conversation_key_includes_channel():
+    assert build_conversation_key("C123", "1710000000.000100") == "C123:1710000000.000100"
+
+
+def test_duplicate_event_detection():
+    seen = {}
+    body = {"event_id": "Ev123"}
+
+    assert is_duplicate_event(body, seen) is False
+    assert is_duplicate_event(body, seen) is True
+    assert is_duplicate_event({"event_id": "Ev456"}, seen) is False
