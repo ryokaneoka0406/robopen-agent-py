@@ -61,6 +61,7 @@ def create_app() -> App:
             return
         thread_ts = event.get("thread_ts") or event.get("ts")
         conversation_key = build_conversation_key(event.get("channel"), thread_ts)
+        source_key = build_source_key(event.get("channel"), event.get("ts"))
 
         def reply(text: str) -> None:
             say(text=text, thread_ts=thread_ts)
@@ -72,6 +73,7 @@ def create_app() -> App:
             scheduler=scheduler,
             user=event.get("user"),
             conversation_key=conversation_key,
+            source_key=source_key,
         )
 
     @app.message(re.compile(".*", re.DOTALL))
@@ -99,6 +101,7 @@ def create_app() -> App:
         thread_ts = message.get("thread_ts") or message.get("ts")
         reply_thread_ts = None if is_direct_message else thread_ts
         conversation_key = build_conversation_key(message.get("channel"), thread_ts)
+        source_key = build_source_key(message.get("channel"), message.get("ts"))
 
         def reply(text: str) -> None:
             if reply_thread_ts:
@@ -113,6 +116,7 @@ def create_app() -> App:
             scheduler=scheduler,
             user=message.get("user"),
             conversation_key=conversation_key,
+            source_key=source_key,
         )
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
@@ -128,6 +132,7 @@ def handle_prompt(
     scheduler: Scheduler,
     user: str | None = None,
     conversation_key: str | None = None,
+    source_key: str | None = None,
 ) -> None:
     trimmed = (prompt or "").strip()
     if not trimmed:
@@ -142,32 +147,40 @@ def handle_prompt(
             ai_intent = None
 
     if ai_intent:
+        if source_key and memory_store.find_task_by_source_key(source_key):
+            return
         if ai_intent.kind == "cron":
             task = memory_store.create_task(
                 title=ai_intent.title,
                 prompt=ai_intent.prompt,
                 schedule_cron=ai_intent.schedule_cron,
+                source_key=source_key,
             )
         else:
             task = memory_store.create_task(
                 title=ai_intent.title,
                 prompt=ai_intent.prompt,
                 run_at=ai_intent.run_at,
+                source_key=source_key,
             )
         scheduler.schedule(task)
         reply(build_task_registered_message(task))
         return
 
     if trimmed.startswith("schedule cron "):
+        if source_key and memory_store.find_task_by_source_key(source_key):
+            return
         parsed = parse_cron_command(trimmed.removeprefix("schedule cron "))
-        task = memory_store.create_task(**parsed)
+        task = memory_store.create_task(**parsed, source_key=source_key)
         scheduler.schedule(task)
         reply(build_task_registered_message(task))
         return
 
     if trimmed.startswith("schedule once "):
+        if source_key and memory_store.find_task_by_source_key(source_key):
+            return
         parsed = parse_one_shot_command(trimmed.removeprefix("schedule once "))
-        task = memory_store.create_task(**parsed)
+        task = memory_store.create_task(**parsed, source_key=source_key)
         scheduler.schedule(task)
         reply(build_task_registered_message(task))
         return
@@ -228,6 +241,12 @@ def build_conversation_key(channel: str | None, thread_ts: str | None) -> str:
     return thread_ts or f"local-{datetime.now().timestamp()}"
 
 
+def build_source_key(channel: str | None, message_ts: str | None) -> str | None:
+    if channel and message_ts:
+        return f"{channel}:{message_ts}"
+    return None
+
+
 def is_duplicate_event(body: dict[str, Any], seen_events: dict[str, float], ttl_seconds: int = 300) -> bool:
     event_id = body.get("event_id")
     if not isinstance(event_id, str) or not event_id:
@@ -275,5 +294,6 @@ def main() -> None:
     app = create_app()
     scheduler = app.client.robopen_scheduler  # type: ignore[attr-defined]
     memory_store = app.client.robopen_memory_store  # type: ignore[attr-defined]
+    memory_store.complete_expired_one_shot_tasks()
     scheduler.restore(memory_store.list_active_tasks())
     SocketModeHandler(app, required("SLACK_APP_TOKEN")).start()

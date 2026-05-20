@@ -39,6 +39,7 @@ class TaskRow:
     last_run_at: str | None
     status: str
     notify_channel: str | None
+    source_key: str | None = None
 
 
 class MemoryStore:
@@ -83,7 +84,8 @@ class MemoryStore:
               run_at TEXT,
               last_run_at TEXT,
               status TEXT NOT NULL,
-              notify_channel TEXT
+              notify_channel TEXT,
+              source_key TEXT UNIQUE
             );
             CREATE TABLE IF NOT EXISTS preferences (
               key TEXT PRIMARY KEY,
@@ -102,6 +104,10 @@ class MemoryStore:
         self._add_column_if_missing("tasks", "prompt", "TEXT NOT NULL DEFAULT ''")
         self._add_column_if_missing("tasks", "run_at", "TEXT")
         self._add_column_if_missing("tasks", "notify_channel", "TEXT")
+        self._add_column_if_missing("tasks", "source_key", "TEXT")
+        self.db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_source_key ON tasks(source_key) WHERE source_key IS NOT NULL"
+        )
         self.db.commit()
 
     def _add_column_if_missing(self, table: str, column: str, definition: str) -> None:
@@ -170,6 +176,10 @@ class MemoryStore:
         rows = self.db.execute("SELECT * FROM tasks WHERE status = 'active'").fetchall()
         return [_task(row) for row in rows]
 
+    def find_task_by_source_key(self, source_key: str) -> TaskRow | None:
+        row = self.db.execute("SELECT * FROM tasks WHERE source_key = ?", (source_key,)).fetchone()
+        return _task(row) if row else None
+
     def create_task(
         self,
         *,
@@ -178,17 +188,31 @@ class MemoryStore:
         schedule_cron: str | None = None,
         run_at: str | None = None,
         notify_channel: str | None = None,
+        source_key: str | None = None,
     ) -> TaskRow:
-        self.db.execute(
-            """
-            INSERT INTO tasks (title, prompt, schedule_cron, run_at, status, notify_channel)
-            VALUES (?, ?, ?, ?, 'active', ?)
-            """,
-            (title, prompt, schedule_cron, run_at, notify_channel),
-        )
-        self.db.commit()
-        row = self.db.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 1").fetchone()
+        try:
+            self.db.execute(
+                """
+                INSERT INTO tasks (title, prompt, schedule_cron, run_at, status, notify_channel, source_key)
+                VALUES (?, ?, ?, ?, 'active', ?, ?)
+                """,
+                (title, prompt, schedule_cron, run_at, notify_channel, source_key),
+            )
+            self.db.commit()
+        except sqlite3.IntegrityError:
+            if not source_key:
+                raise
+            self.db.rollback()
+
+        if source_key:
+            row = self.db.execute("SELECT * FROM tasks WHERE source_key = ?", (source_key,)).fetchone()
+        else:
+            row = self.db.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 1").fetchone()
         return _task(row)
+
+    def cancel_task(self, task_id: int) -> None:
+        self.db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = ?", (task_id,))
+        self.db.commit()
 
     def mark_task_run(self, task_id: int) -> None:
         self.db.execute(
@@ -198,6 +222,20 @@ class MemoryStore:
 
     def complete_task(self, task_id: int) -> None:
         self.db.execute("UPDATE tasks SET status = 'done' WHERE id = ?", (task_id,))
+        self.db.commit()
+
+    def complete_expired_one_shot_tasks(self, now_iso: str | None = None) -> None:
+        now = now_iso or utc_now_iso()
+        self.db.execute(
+            """
+            UPDATE tasks
+               SET status = 'done'
+             WHERE status = 'active'
+               AND run_at IS NOT NULL
+               AND run_at <= ?
+            """,
+            (now,),
+        )
         self.db.commit()
 
 
@@ -224,5 +262,5 @@ def _task(row: sqlite3.Row) -> TaskRow:
         last_run_at=row["last_run_at"],
         status=row["status"],
         notify_channel=row["notify_channel"],
+        source_key=row["source_key"] if "source_key" in row.keys() else None,
     )
-

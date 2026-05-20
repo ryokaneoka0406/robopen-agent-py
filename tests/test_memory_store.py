@@ -33,3 +33,42 @@ def test_task_lifecycle(tmp_path):
     finally:
         store.close()
 
+
+def test_task_source_key_is_idempotent(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    try:
+        first = store.create_task(
+            title="say hello",
+            prompt="hello",
+            run_at="2026-05-20T12:00:00Z",
+            source_key="C123:1710000000.000100",
+        )
+        second = store.create_task(
+            title="say hello again",
+            prompt="hello again",
+            run_at="2026-05-20T12:01:00Z",
+            source_key="C123:1710000000.000100",
+        )
+
+        assert second.id == first.id
+        assert second.title == first.title
+        assert store.find_task_by_source_key("C123:1710000000.000100") == first
+    finally:
+        store.close()
+
+
+def test_complete_expired_one_shot_tasks(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    try:
+        expired = store.create_task(title="expired", prompt="run", run_at="2026-05-20T12:00:00Z")
+        future = store.create_task(title="future", prompt="run", run_at="2026-05-20T12:10:00Z")
+        cron = store.create_task(title="cron", prompt="run", schedule_cron="0 0 * * *")
+
+        store.complete_expired_one_shot_tasks("2026-05-20T12:05:00Z")
+        active_ids = {task.id for task in store.list_active_tasks()}
+
+        assert expired.id not in active_ids
+        assert future.id in active_ids
+        assert cron.id in active_ids
+    finally:
+        store.close()

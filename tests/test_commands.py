@@ -2,6 +2,7 @@ import pytest
 
 from robopen_agent.app import (
     build_conversation_key,
+    build_source_key,
     convert_cron_utc_to_jst_label,
     format_schedule_for_jst,
     is_duplicate_event,
@@ -41,6 +42,12 @@ def test_convert_cron_utc_to_jst_label():
 
 def test_build_conversation_key_includes_channel():
     assert build_conversation_key("C123", "1710000000.000100") == "C123:1710000000.000100"
+
+
+def test_build_source_key_requires_channel_and_message_ts():
+    assert build_source_key("C123", "1710000000.000100") == "C123:1710000000.000100"
+    assert build_source_key("C123", None) is None
+    assert build_source_key(None, "1710000000.000100") is None
 
 
 def test_duplicate_event_detection():
