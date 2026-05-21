@@ -1,7 +1,7 @@
 [project]
 name = "robopen-agent-py"
 version = "0.1.0"
-description = "Slack-connected personal agent wrapper around Codex CLI."
+description = "Slack-connected personal agent wrapper around Codex CLI and Claude Code."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

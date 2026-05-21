@@ -5,8 +5,8 @@
 実行対象となる「個人用パーソナルエージェント」の人格定義ファイルではない点に注意する。
 
 ## プロジェクト概要（開発対象）
-- 開発対象は、Codex CLIをコアにしたSlack連携の個人用パーソナルエージェント。
-- 主な構成は Wrapper / Scheduler / SQLite Memory / Codex CLI 連携。
+- 開発対象は、Codex CLI / Claude Codeをagent engineとして呼び出すSlack連携の個人用パーソナルエージェント。
+- 主な構成は Wrapper / Scheduler / SQLite Memory / agent engine adapter。
 - 本リポジトリでは、上記システムの設計・実装・運用ドキュメントを段階的に整備する。
 
 ## 開発時の基本方針
@@ -22,6 +22,7 @@
 ## 実装ルール
 - 実装言語は Python を標準とし、パッケージ管理と仮想環境は `uv` を使用する。
 - Slack連携・Scheduler・Memoryの責務を分離し、密結合を避ける。
+- Codex CLI / Claude Code対応はagent engine adapter境界に閉じ込め、Slack・Scheduler・Memory層へ個別CLI仕様を漏らさない。
 - 永続化スキーマ変更時は、マイグレーション方針を同時に記載する。
 - セキュリティ関連（トークン、権限、監査ログ）は機能追加より優先して担保する。
 
@@ -34,4 +35,3 @@
 - 設計書: `documents/designdoc.md`
 - タスク一覧: `tasks/*.md`
 - 並行実行戦略: `tasks/strategy.md`
-

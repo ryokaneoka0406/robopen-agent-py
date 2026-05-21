@@ -1,6 +1,6 @@
 # robopen-agent-py
 
-Slack から Codex CLI を呼び出す個人用エージェントの Python 実装です。
+Slack から Codex CLI / Claude Code を呼び出す個人用エージェントの Python 実装です。
 
 ## Setup
 
@@ -14,10 +14,15 @@ cp .env.example .env
 ```dotenv
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
+AGENT_ENGINE=codex
 CODEX_CMD=codex
+CLAUDE_CMD=claude
+CLAUDE_PERMISSION_MODE=dontAsk
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
 ```
+
+`AGENT_ENGINE=claude` にすると Claude Code の headless/print mode を使います。Claude Code 側は事前にログインまたはAPI key設定を済ませてください。
 
 ## Run
 
@@ -36,4 +41,3 @@ uv run python -m robopen_agent
 ```sh
 uv run pytest
 ```
-

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from .codex_runner import run_codex
+from .agent_runner import get_agent_engine, run_agent
 from .memory_store import MemoryStore, TaskRow
 from .schedule_intent_parser import parse_schedule_intent_with_ai
 from .scheduler import Scheduler
@@ -39,7 +39,7 @@ def create_app() -> App:
     )
 
     def run_scheduled_task(task: TaskRow) -> None:
-        result = run_codex(task.prompt or task.title)
+        result = run_agent(task.prompt or task.title)
         memory_store.mark_task_run(task.id)
         if task.run_at:
             memory_store.complete_task(task.id)
@@ -190,14 +190,16 @@ def handle_prompt(
     reply("処理中です...")
 
     try:
-        result = run_codex(trimmed, conversation.codex_rollout_id)
-        if result.session_id and result.session_id != conversation.codex_rollout_id:
-            memory_store.set_codex_rollout_id(conversation.id, result.session_id)
+        engine = get_agent_engine()
+        session_id = memory_store.get_agent_session_id(conversation, engine)
+        result = run_agent(trimmed, session_id)
+        if result.session_id and result.session_id != session_id:
+            memory_store.set_agent_session(conversation.id, engine, result.session_id)
         memory_store.append_message(conversation.id, "assistant", result.text)
         user_prefix = f"<@{user}> " if user else ""
         reply(f"{user_prefix}{result.text}")
     except Exception as exc:
-        reply(f"Codex実行でエラーが発生しました: {exc}")
+        reply(f"エージェント実行でエラーが発生しました: {exc}")
 
 
 def build_task_registered_message(task: TaskRow) -> str:

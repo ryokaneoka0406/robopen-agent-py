@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from .codex_runner import run_codex
+from .agent_runner import run_agent
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ def parse_schedule_intent_with_ai(input_text: str) -> ParsedScheduleIntent | Non
         ]
     )
 
-    text = run_codex(parsing_prompt).text.strip()
+    text = run_agent(parsing_prompt).text.strip()
     start = text.find("{")
     end = text.rfind("}")
     if start < 0 or end <= start:
@@ -66,4 +66,3 @@ def parse_schedule_intent_with_ai(input_text: str) -> ParsedScheduleIntent | Non
         )
 
     return None
-

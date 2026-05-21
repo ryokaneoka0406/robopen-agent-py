@@ -16,6 +16,8 @@ class Conversation:
     id: int
     slack_thread_ts: str
     codex_rollout_id: str | None
+    agent_engine: str | None
+    agent_session_id: str | None
     parent_conversation_id: int | None
     started_at: str
     summary: str | None
@@ -61,6 +63,8 @@ class MemoryStore:
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               slack_thread_ts TEXT NOT NULL UNIQUE,
               codex_rollout_id TEXT,
+              agent_engine TEXT,
+              agent_session_id TEXT,
               parent_conversation_id INTEGER,
               started_at TEXT NOT NULL,
               summary TEXT,
@@ -105,6 +109,24 @@ class MemoryStore:
         self._add_column_if_missing("tasks", "run_at", "TEXT")
         self._add_column_if_missing("tasks", "notify_channel", "TEXT")
         self._add_column_if_missing("tasks", "source_key", "TEXT")
+        self._add_column_if_missing("conversations", "agent_engine", "TEXT")
+        self._add_column_if_missing("conversations", "agent_session_id", "TEXT")
+        self.db.execute(
+            """
+            UPDATE conversations
+               SET agent_engine = 'codex'
+             WHERE agent_engine IS NULL
+               AND codex_rollout_id IS NOT NULL
+            """
+        )
+        self.db.execute(
+            """
+            UPDATE conversations
+               SET agent_session_id = codex_rollout_id
+             WHERE agent_session_id IS NULL
+               AND codex_rollout_id IS NOT NULL
+            """
+        )
         self.db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_source_key ON tasks(source_key) WHERE source_key IS NOT NULL"
         )
@@ -123,9 +145,10 @@ class MemoryStore:
         self.db.execute(
             """
             INSERT INTO conversations
-              (slack_thread_ts, codex_rollout_id, parent_conversation_id, started_at,
+              (slack_thread_ts, codex_rollout_id, agent_engine, agent_session_id,
+               parent_conversation_id, started_at,
                summary, token_usage_estimate, last_active_at)
-            VALUES (?, NULL, NULL, ?, NULL, 0, ?)
+            VALUES (?, NULL, NULL, NULL, NULL, ?, NULL, 0, ?)
             """,
             (slack_thread_ts, now, now),
         )
@@ -140,10 +163,39 @@ class MemoryStore:
 
     def set_codex_rollout_id(self, conversation_id: int, rollout_id: str) -> None:
         self.db.execute(
-            "UPDATE conversations SET codex_rollout_id = ? WHERE id = ?",
-            (rollout_id, conversation_id),
+            """
+            UPDATE conversations
+               SET codex_rollout_id = ?,
+                   agent_engine = 'codex',
+                   agent_session_id = ?
+             WHERE id = ?
+            """,
+            (rollout_id, rollout_id, conversation_id),
         )
         self.db.commit()
+
+    def set_agent_session(
+        self, conversation_id: int, engine: str, session_id: str | None
+    ) -> None:
+        codex_rollout_id = session_id if engine == "codex" else None
+        self.db.execute(
+            """
+            UPDATE conversations
+               SET agent_engine = ?,
+                   agent_session_id = ?,
+                   codex_rollout_id = COALESCE(?, codex_rollout_id)
+             WHERE id = ?
+            """,
+            (engine, session_id, codex_rollout_id, conversation_id),
+        )
+        self.db.commit()
+
+    def get_agent_session_id(self, conversation: Conversation, engine: str) -> str | None:
+        if conversation.agent_engine == engine and conversation.agent_session_id:
+            return conversation.agent_session_id
+        if engine == "codex":
+            return conversation.codex_rollout_id
+        return None
 
     def append_message(
         self, conversation_id: int, role: Literal["user", "assistant"], content: str
@@ -244,6 +296,8 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         id=row["id"],
         slack_thread_ts=row["slack_thread_ts"],
         codex_rollout_id=row["codex_rollout_id"],
+        agent_engine=row["agent_engine"] if "agent_engine" in row.keys() else None,
+        agent_session_id=row["agent_session_id"] if "agent_session_id" in row.keys() else None,
         parent_conversation_id=row["parent_conversation_id"],
         started_at=row["started_at"],
         summary=row["summary"],

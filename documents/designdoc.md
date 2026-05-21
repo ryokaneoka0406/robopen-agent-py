@@ -2,11 +2,11 @@
 
 ## 1. 概要
 
-Codex CLIをコアの推論／実行エンジンとしてラップし、Slackから自然言語で指示できる個人専用のパーソナルエージェントを構築する。VPS上に常駐させ、対話・スケジュール起動・長期記憶の3軸でユーザーの作業を伴走することを目的とする。
+Codex CLI / Claude Codeをagent engineとしてラップし、Slackから自然言語で指示できる個人専用のパーソナルエージェントを構築する。VPS上に常駐させ、対話・スケジュール起動・長期記憶の3軸でユーザーの作業を伴走することを目的とする。
 
 ## 2. 目的とゴール
 
-- Slack上でテキストを送るだけで、Codex CLIの能力（コード実行、ファイル操作、外部API呼び出しなど）を呼び出せる状態を作る。
+- Slack上でテキストを送るだけで、Codex CLI / Claude Codeの能力（コード実行、ファイル操作、外部API呼び出しなど）を呼び出せる状態を作る。
 - cron的なスケジュール起動と、Slack経由のadhoc起動の両方をサポートする。
 - 会話・タスク履歴・好みなどをSQLiteに永続化し、セッションを跨いだ文脈保持を行う。
 - 破壊的操作（削除系）のみ人間の確認を挟み、それ以外は原則として自律実行する。
@@ -15,7 +15,7 @@ Codex CLIをコアの推論／実行エンジンとしてラップし、Slackか
 ## 3. 非ゴール
 
 - マルチユーザー対応（当面は自分1人専用）。
-- 複数LLMプロバイダ／ローカルLLMへの抽象化（Codex CLIに固定）。
+- 任意のLLMプロバイダ／ローカルLLMへの汎用抽象化。当面はCLI adapter方式でCodex CLI / Claude Codeのみ対応する。
 - リッチなWeb UI（操作面はSlackとCLIに限定）。
 
 ## 4. アーキテクチャ概要
@@ -26,9 +26,12 @@ flowchart LR
     SlackAPI --> Wrapper["Wrapper Layer (Python)"]
     Scheduler["Scheduler (cron / one-shot)"] --> Wrapper
     Wrapper --> Memory[("SQLite Memory")]
-    Wrapper --> Codex["Codex CLI Process"]
+    Wrapper --> Agent["Agent Engine Adapter"]
+    Agent --> Codex["Codex CLI Process"]
+    Agent --> Claude["Claude Code Process"]
     Codex --> Tools["Skills / Tools (shell, fs, http, etc.)"]
-    Codex --> Wrapper
+    Claude --> Tools
+    Agent --> Wrapper
     Wrapper -->|reply| SlackAPI
 ```
 
@@ -36,20 +39,23 @@ flowchart LR
 
 ### 5.1 Wrapper Layer
 
-- 役割: Slackイベント受信、スケジューラ起動、Codex CLIの子プロセス管理、メモリ読み書き、確認フロー制御。
+- 役割: Slackイベント受信、スケジューラ起動、agent engineの子プロセス管理、メモリ読み書き、確認フロー制御。
 - 実装言語: Python。パッケージ管理と仮想環境は `uv` に統一し、`.env` は `python-dotenv` で読み込む。
 - 主なモジュール
   - slack_gateway: Slack Events API (Socket Mode)から入力を受け、出力を整形して返す。
-  - session_manager: Slackスレッド（slack_thread_ts）単位でCodex CLIのセッション（rollout）を1対1に対応付ける。スレッド初回はcodexを新規起動し、以降は `codex resume <rollout_id>` で再開する。コンテキスト消費が閾値を超えた場合は、要約を生成したうえで新しいrolloutへロールオーバーする。
-  - codex_runner: Codex CLIをサブプロセスとして起動し、stdin/stdoutでやりとりする。新規セッションと `codex resume` を呼び分け、一定時間アイドルになったらプロセスを終了してメモリリークの蓄積を抑える。
+  - session_manager: Slackスレッド（slack_thread_ts）単位でagent engineのセッションを1対1に対応付ける。スレッド初回は新規起動し、以降は保存済み `agent_session_id` で再開する。コンテキスト消費が閾値を超えた場合は、要約を生成したうえで新しいセッションへロールオーバーする。
+  - agent_runner: `AGENT_ENGINE=codex|claude` に従ってCodex CLI / Claude Codeをサブプロセスとして起動する。Codexは `codex exec`、Claude Codeは `claude -p --output-format json` を使う。
   - approval_guard: 削除系コマンドを検出した際にSlackで確認ボタンを出して承認を待つ。
   - memory_store: SQLiteに会話・タスク・好みを保存／検索する。
   - scheduler: 定期実行ジョブを管理し、Wrapperにイベントを流す。
 
-### 5.2 Codex CLI 層
+### 5.2 Agent Engine 層
 
-- AGENTS.mdに人格、口調、安全規約、よく使うショートカットを記述する。
-- Skillsはリポジトリ内のscripts/ディレクトリに配置し、Codex CLIから呼び出せる形にしておく。
+- 既定engineは既存互換の `codex` とし、`.env` の `AGENT_ENGINE=claude` でClaude Codeに切り替える。
+- Codex CLIは `codex exec --json --output-last-message` を使い、stdout JSONLから `thread_id` を読む。
+- Claude Codeは headless/print mode の `claude -p --output-format json` を使い、応答本文は `result`、継続IDは `session_id` から読む。
+- AGENTS.mdはリポジトリ開発ガイドであり、個人用エージェントの人格定義ではない。agent engineに渡す恒久ルールは別途設計する。
+- Skillsはリポジトリ内のscripts/ディレクトリに配置し、選択中のagent engineから呼び出せる形にしておく。
 - 「スキルを作るスキル」をひとつ用意し、新しいskillの雛形生成・登録までを自動化する。
 
 ### 5.3 メモリ層 (SQLite)
@@ -58,13 +64,13 @@ flowchart LR
 
 | テーブル | 主なカラム | 用途 |
 | --- | --- | --- |
-| conversations | id, slack_thread_ts, codex_rollout_id, parent_conversation_id, started_at, summary, token_usage_estimate, last_active_at | Slackスレッド単位の会話メタデータ。1スレッド＝1 conversationを基本とし、ロールオーバー時は新しいレコードを作成してparent_conversation_idで連結する |
+| conversations | id, slack_thread_ts, codex_rollout_id, agent_engine, agent_session_id, parent_conversation_id, started_at, summary, token_usage_estimate, last_active_at | Slackスレッド単位の会話メタデータ。`agent_session_id` を主系にし、`codex_rollout_id` は既存互換用に残す |
 | messages | id, conversation_id, role, content, created_at | 会話ログ |
 | tasks | id, title, schedule_cron, last_run_at, status | 定期タスク／予約タスク |
 | preferences | key, value, updated_at | 口調や承認ポリシーなどの長期設定 |
 | audit_logs | id, action, target, approved_by, created_at | 削除系などの操作履歴 |
 
-要約や長期記憶は、conversationsテーブルのsummaryカラムにCodex CLI自身が定期的に圧縮して書き戻す方式とする。要約トリガは以下を併用する。
+要約や長期記憶は、conversationsテーブルのsummaryカラムに選択中のagent engineが定期的に圧縮して書き戻す方式とする。要約トリガは以下を併用する。
 
 - トークン使用量ベース: rolloutのコンテキスト消費が60%を超えたら自動要約し、新しいrolloutへロールオーバーする。要約は新rolloutの冒頭にシステムメッセージとして注入する。
 - アイドル時間ベース: スレッド最終発言から24時間無発言が続いた場合に自動要約し、長期記憶として固定化する。
@@ -95,21 +101,21 @@ flowchart LR
 
 1. ユーザーがSlackでメンションまたはDMを送る。
 2. slack_gatewayがイベントを受信し、session_managerに渡す。
-3. session_managerはslack_thread_tsに紐づくconversationsレコードを参照し、codex_rollout_idがあれば `codex resume <rollout_id>` で再開、なければ新規にcodexセッションを起動する。最新の要約とpreferencesは冒頭のシステムメッセージとして渡す。
-4. codex_runnerがCodex CLIにユーザーメッセージを渡し、ストリーミング出力をSlackに返す。完了時にrollout_idとトークン使用量をconversationsへ書き戻し、コンテキスト消費が閾値を超えていれば次回以降のロールオーバーをスケジュールする。
+3. session_managerはslack_thread_tsに紐づくconversationsレコードを参照し、現在の `AGENT_ENGINE` と一致する `agent_session_id` があれば再開、なければ新規セッションを起動する。最新の要約とpreferencesは冒頭のシステムメッセージとして渡す。
+4. agent_runnerが選択中のagent engineにユーザーメッセージを渡し、出力をSlackに返す。完了時にagent_session_idとトークン使用量をconversationsへ書き戻し、コンテキスト消費が閾値を超えていれば次回以降のロールオーバーをスケジュールする。
 5. 出力中に削除系コマンド（rm, DROP, deleteなど）を検出した場合、approval_guardが介入してユーザーに確認する。
 6. 完了後、messagesとaudit_logsを更新する。
 
 ### 6.2 スケジュール起動
 
 1. schedulerがtasksの実行時刻を検知する。
-2. Wrapperが対応するプロンプトを組み立て、Codex CLIに投げる。
+2. Wrapperが対応するプロンプトを組み立て、選択中のagent engineに投げる。
 3. 結果をSlackの通知チャンネルに送り、必要ならフォローアップスレッドを開く。
 
 ### 6.3 スキル追加
 
 1. ユーザーが「新しいskillを作って」と依頼する。
-2. Codex CLIが「スキルを作るスキル」を起動し、scripts/配下にテンプレートを生成する。
+2. 選択中のagent engineが「スキルを作るスキル」を起動し、scripts/配下にテンプレートを生成する。
 3. AGENTS.mdにskillの説明を追記し、コミットする。
 
 ## 7. セキュリティと安全策
@@ -138,6 +144,7 @@ flowchart LR
 | M3 確認フロー | 削除系コマンドのapproval_guardを組み込む | rm系操作で必ず確認が走る |
 | M4 VPS常駐 | VPSにdocker-composeで本番デプロイ | 24時間稼働とログ監視ができる |
 | M5 スキル拡張 | 「スキルを作るスキル」と最初の実用skill 2〜3本 | 会話からskillが追加できる |
+| M7 Claude Code / Codex両対応 | agent engine adapterでCodex CLI / Claude Codeを切替 | `AGENT_ENGINE=codex|claude` でSlack経由の対話とスケジュール実行が動く |
 
 ## 10. 未決事項
 
