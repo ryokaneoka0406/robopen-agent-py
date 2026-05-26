@@ -17,6 +17,7 @@
   - 受信テキストをCodex実行へ渡し、返答をSlackへ返信。
 - `robopen_agent/codex_runner.py`
   - `codex exec --json --output-last-message <file> -` をサブプロセス実行。
+  - Codex CLIの実行ディレクトリはデフォルトでプロジェクト直下の `workspace/` とし、`CODEX_WORKSPACE_DIR` で上書き可能にする。
   - 最終応答ファイルを返却し、異常終了時はstderrを含めて例外化。
 - `pyproject.toml`
   - `uv run robopen-agent` で起動できるコンソールスクリプトを定義。

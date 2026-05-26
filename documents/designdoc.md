@@ -41,7 +41,7 @@ flowchart LR
 - 主なモジュール
   - slack_gateway: Slack Events API (Socket Mode)から入力を受け、出力を整形して返す。
   - session_manager: Slackスレッド（slack_thread_ts）単位でCodex CLIのセッション（rollout）を1対1に対応付ける。スレッド初回はcodexを新規起動し、以降は `codex resume <rollout_id>` で再開する。コンテキスト消費が閾値を超えた場合は、要約を生成したうえで新しいrolloutへロールオーバーする。
-  - codex_runner: Codex CLIをサブプロセスとして起動し、stdin/stdoutでやりとりする。新規セッションと `codex resume` を呼び分け、一定時間アイドルになったらプロセスを終了してメモリリークの蓄積を抑える。
+  - codex_runner: Codex CLIをサブプロセスとして起動し、stdin/stdoutでやりとりする。新規セッションと `codex resume` を呼び分け、既定ではリポジトリ直下の `workspace/` を作業ディレクトリとして実行する。一定時間アイドルになったらプロセスを終了してメモリリークの蓄積を抑える。
   - approval_guard: 削除系コマンドを検出した際にSlackで確認ボタンを出して承認を待つ。
   - memory_store: SQLiteに会話・タスク・好みを保存／検索する。
   - scheduler: 定期実行ジョブを管理し、Wrapperにイベントを流す。
@@ -49,6 +49,7 @@ flowchart LR
 ### 5.2 Codex CLI 層
 
 - AGENTS.mdに人格、口調、安全規約、よく使うショートカットを記述する。
+- Codex CLIの作業ディレクトリは `workspace/` に切り出し、Wrapper本体・設計文書・タスク管理ファイルへの意図しない変更を避ける。運用時に別ディレクトリへ分離したい場合は `CODEX_WORKSPACE_DIR` で上書きする。
 - Skillsはリポジトリ内のscripts/ディレクトリに配置し、Codex CLIから呼び出せる形にしておく。
 - 「スキルを作るスキル」をひとつ用意し、新しいskillの雛形生成・登録までを自動化する。
 
