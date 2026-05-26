@@ -9,15 +9,32 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CODEX_WORKSPACE_DIR = PROJECT_ROOT / "workspace"
+
+
 @dataclass(frozen=True)
 class CodexResult:
     text: str
     session_id: str | None = None
 
 
+def get_codex_workspace_dir() -> Path:
+    """Return the directory where Codex CLI should execute user tasks."""
+    configured = os.environ.get("CODEX_WORKSPACE_DIR")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_absolute():
+            return configured_path.resolve()
+        return (PROJECT_ROOT / configured_path).resolve()
+    return DEFAULT_CODEX_WORKSPACE_DIR
+
+
 def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
     """Run Codex CLI for a single turn and return the final assistant message."""
     codex_cmd = os.environ.get("CODEX_CMD", "codex")
+    workspace_dir = get_codex_workspace_dir()
+    workspace_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix="codex-"))
     out_file = tmp_dir / "last.txt"
 
@@ -33,6 +50,7 @@ def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
             text=True,
             capture_output=True,
             env=os.environ.copy(),
+            cwd=workspace_dir,
             check=False,
         )
         if completed.returncode != 0:
@@ -63,4 +81,3 @@ def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
         raise RuntimeError(f"Failed to start Codex CLI: {exc}") from exc
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-

@@ -15,9 +15,13 @@ cp .env.example .env
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 CODEX_CMD=codex
+CODEX_WORKSPACE_DIR=workspace
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
 ```
+
+Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作業ディレクトリとして実行します。
+必要に応じて `CODEX_WORKSPACE_DIR` に絶対パス、または起動ディレクトリからの相対パスを指定して変更できます。
 
 ## Run
 
@@ -36,4 +40,3 @@ uv run python -m robopen_agent
 ```sh
 uv run pytest
 ```
-
