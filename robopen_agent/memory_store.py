@@ -87,18 +87,8 @@ class MemoryStore:
               notify_channel TEXT,
               source_key TEXT UNIQUE
             );
-            CREATE TABLE IF NOT EXISTS preferences (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL,
-              updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS audit_logs (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              action TEXT NOT NULL,
-              target TEXT,
-              approved_by TEXT,
-              created_at TEXT NOT NULL
-            );
+            DROP TABLE IF EXISTS preferences;
+            DROP TABLE IF EXISTS audit_logs;
             """
         )
         self._add_column_if_missing("tasks", "prompt", "TEXT NOT NULL DEFAULT ''")
