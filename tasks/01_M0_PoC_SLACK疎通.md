@@ -11,7 +11,7 @@
 ## 実装内容（詳細）
 
 ### 1. 実装ファイル
-- `robopen_agent/app.py`
+- `robopen_agent.app`
   - Slack Bolt for Python (Socket Mode) を起動。
   - DMまたはメンションを受信したときだけ処理。
   - 受信テキストをCodex実行へ渡し、返答をSlackへ返信。
@@ -27,7 +27,7 @@
 
 ### 2. 最小フロー（M0スコープ）
 1. Slack Socket ModeでDM/メンションイベントを受信。
-2. Wrapper層（`robopen_agent/app.py`）で入力文を抽出。
+2. Wrapper層（`robopen_agent.app`）で入力文を抽出。
 3. `robopen_agent/codex_runner.py` がCodex CLIを実行。
 4. 実行結果をSlackへ返信。
 

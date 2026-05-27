@@ -22,6 +22,7 @@ SLACK_LOG_CHANNEL=C0123456789
 
 Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作業ディレクトリとして実行します。
 必要に応じて `CODEX_WORKSPACE_DIR` に絶対パス、または起動ディレクトリからの相対パスを指定して変更できます。
+`.env` にはSlack tokenなどのsecretを含むため、リポジトリへコミットしないでください。
 
 ## Run
 
@@ -34,6 +35,14 @@ uv run robopen-agent
 ```sh
 uv run python -m robopen_agent
 ```
+
+## Raspberry Pi 常駐
+
+本番運用ではRaspberry Pi上で `uv run robopen-agent` をsystemd serviceとして起動します。
+SSHを切っても動き続け、Raspberry Pi再起動後も自動起動できます。
+
+手順は [documents/raspberry-pi-systemd.md](documents/raspberry-pi-systemd.md) を参照してください。
+短時間の検証には `tmux` も使えますが、常時起動の標準はsystemdです。
 
 ## Test
 

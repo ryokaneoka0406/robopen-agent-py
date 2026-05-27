@@ -19,7 +19,7 @@ M1 永続化: SQLiteメモリ実装
 - `MemoryStore.get_or_create_conversation` を追加し、Slackの `thread_ts`（または投稿 `ts`）単位で会話メタを作成・再利用するようにした。
 - `MemoryStore.append_message` で user/assistant の発話を `messages` に保存し、`conversations.last_active_at` を更新するようにした。
 - `MemoryStore.get_recent_context` / `get_summary` を追加し、直近メッセージと要約（summary）を参照できるようにした。
-- `robopen_agent/app.py` を更新し、Slackイベント処理時に以下を行うようにした。
+- `robopen_agent.app` を更新し、Slackイベント処理時に以下を行うようにした。
   1. スレッド単位で conversation を取得/作成
   2. ユーザー入力を messages へ保存
   3. 保存済みの `codex_rollout_id` があれば `codex exec resume` で同じCodex文脈を再利用する
@@ -41,5 +41,5 @@ M1 永続化: SQLiteメモリ実装
    - `sqlite3 data/agent.db 'select conversation_id, role, substr(content,1,60), created_at from messages order by id desc limit 10;'`
 
 ## 補足
-- `codex_rollout_id` はスキーマに含めているが、実際の `codex resume` 連携は次タスクで段階的に拡張する。
+- `codex_rollout_id` は `codex exec` の `thread_id` を保存し、同一Slackスレッドの後続発話で `codex exec resume <thread_id>` に渡す。
 - 2026-05-27更新: SQLiteはSlackの作業ログとWrapper復元用メタデータに限定する方針へ変更した。`preferences` と `audit_logs` は廃止し、エージェントの人格・長期記憶・スキルは `workspace/` に集約する。

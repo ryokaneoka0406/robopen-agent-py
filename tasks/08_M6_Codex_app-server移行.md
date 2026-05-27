@@ -29,7 +29,7 @@
 - app-server プロトコルは experimental で変更リスクがある。CLI バージョン固定と protocol adapter が必要。
 - `codex exec` の単発実行より実装量が増える。JSON-RPC、request/response 相関、server request への応答、再接続処理が必要。
 - Slack interactive button の二重クリック、approval 待ち中のタイムアウト、Codex 側への `accept` / `decline` / `cancel` 返却を正しく扱う必要がある。
-- VPS 運用では app-server 常駐プロセスの監視、socket 保護、auth token、再起動時の thread 復元が追加で必要。
+- Raspberry Pi / systemd 運用では app-server 常駐プロセスの監視、socket 保護、auth token、再起動時の thread 復元が追加で必要。
 
 ## 実装方針メモ
 - まず `CodexClient` adapter を追加し、既存呼び出し側には `runCodex(prompt, sessionId)` 相当のインターフェースを維持する。

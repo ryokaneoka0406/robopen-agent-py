@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-Codex CLIをコアの推論／実行エンジンとしてラップし、Slackから自然言語で指示できる個人専用のパーソナルエージェントを構築する。VPS上に常駐させ、対話・スケジュール起動・workspace上の長期記憶の3軸でユーザーの作業を伴走することを目的とする。
+Codex CLIをコアの推論／実行エンジンとしてラップし、Slackから自然言語で指示できる個人専用のパーソナルエージェントを構築する。Raspberry Pi上にsystemd serviceとして常駐させ、対話・スケジュール起動・workspace上の長期記憶の3軸でユーザーの作業を伴走することを目的とする。
 
 ## 2. 目的とゴール
 
@@ -87,7 +87,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 ### 5.5 Slack 連携
 
-- Socket Modeでアウトバウンド接続のみとし、VPSのポート開放を不要にする。
+- Socket Modeでアウトバウンド接続のみとし、Raspberry Pi側のポート開放を不要にする。
 - DMとメンションをトリガとして受け付ける。
 - 削除系の確認はinteractive message (Block Kit) のApprove / Denyボタンで行う。
 
@@ -118,17 +118,20 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 - 削除系コマンド、外部送金、外部APIの破壊的操作はすべてapproval_guardで確認を取る。
 - 承認待ちのアクションはタイムアウト（例: 10分）で自動キャンセルする。
-- VPSへのSSHは公開鍵のみ、Slack Bot Tokenとシークレットはdotenvで管理し、リポジトリには含めない。
+- Raspberry PiへのSSHは公開鍵のみ、Slack Bot Tokenとシークレットは `.env` で管理し、リポジトリには含めない。systemdからは `EnvironmentFile=/home/<user>/robopen-agent-py/.env` で読み込む。
 - 承認対象の操作はSlackスレッド上に要求・承認・拒否・タイムアウトを投稿し、そのSlack作業ログをSQLiteのmessagesへ保存する。SQLiteに専用audit_logsテーブルは持たない。
 - Codex CLIの5時間ローリング上限と週次クォータを `/status` 相当の手段で定期取得し、残量が閾値（例: 残10%）を割ったらスケジュール起動タスクを自動でスキップ・先延ばしする。
-- codex関連プロセスはsystemdのMemoryMax/MemoryHighでメモリ上限を設け、超過時は自動再起動する。長時間稼働によるメモリリーク蓄積を抑えるため、日次の定期再起動も併用する。
+- robopen-agentおよびcodex関連プロセスはsystemdの `Restart=always` で異常終了時に自動復旧する。必要に応じて `MemoryMax` / `MemoryHigh` と日次の定期再起動を追加し、長時間稼働によるメモリリーク蓄積を抑える。
 
 ## 8. デプロイ
 
-- VPS (Ubuntu想定) にdocker-compose一式で配置する。
-- コンテナ構成: wrapper, codex-cli (sidecar), sqlite (volume mount)。
-- systemdで再起動を保証し、ログはjournald経由で集約する。
-- バックアップはSQLiteファイルを日次でオブジェクトストレージへ転送する。
+- Raspberry Piにリポジトリを配置し、`uv sync` で依存関係を同期する。
+- 標準起動コマンドは `uv run robopen-agent` とする。`uv run python -m robopen_agent` は代替起動手段として扱う。
+- 本番運用では `robopen-agent.service` をsystemdに登録し、SSH切断後も常駐させる。Raspberry Pi再起動後は `systemctl enable` により自動起動する。
+- systemd unitは `EnvironmentFile` で `.env` を読み込み、Slack token、`CODEX_CMD`、`CODEX_WORKSPACE_DIR`、`SQLITE_PATH`、`SLACK_LOG_CHANNEL` を注入する。
+- ログはjournaldで確認する。標準の確認コマンドは `journalctl -u robopen-agent -f` とする。
+- SQLiteは `data/agent.db` を標準配置とし、日次バックアップと復元手順を運用ドキュメントで管理する。
+- コンテナ運用は当面の標準運用から外し、必要になった場合の将来検討扱いにする。
 
 ## 9. 段階的マイルストン
 
@@ -138,7 +141,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 | M1 永続化 | SQLiteにSlack作業ログを保存し、スレッド単位で文脈を維持 | 過去のSlack発言と作業結果を参照した応答ができる |
 | M2 スケジューラ | cron式タスクの登録・実行・通知 | 毎朝の要約タスクが自動投稿される |
 | M3 確認フロー | 削除系コマンドのapproval_guardを組み込む | rm系操作で必ず確認が走る |
-| M4 VPS常駐 | VPSにdocker-composeで本番デプロイ | 24時間稼働とログ監視ができる |
+| M4 Raspberry Pi常駐 | Raspberry Piにsystemd serviceとして本番デプロイ | SSH切断後・再起動後も常駐し、ログ監視ができる |
 | M5 スキル拡張 | 「スキルを作るスキル」と最初の実用skill 2〜3本 | 会話からskillが追加できる |
 
 ## 10. 未決事項
