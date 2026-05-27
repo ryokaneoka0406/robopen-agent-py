@@ -13,6 +13,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .codex_runner import run_codex
 from .memory_store import MemoryStore, TaskRow
+from .proactive import config_from_env, ensure_proactive_tasks, is_proactive_task
 from .schedule_intent_parser import parse_schedule_intent_with_ai
 from .scheduler import Scheduler
 
@@ -30,6 +31,7 @@ def required(name: str) -> str:
 def create_app() -> App:
     load_dotenv()
     memory_store = MemoryStore(os.environ.get("SQLITE_PATH", "data/agent.db"))
+    proactive_config = config_from_env()
     seen_events: dict[str, float] = {}
 
     app = App(
@@ -39,6 +41,27 @@ def create_app() -> App:
     )
 
     def run_scheduled_task(task: TaskRow) -> None:
+        if is_proactive_task(task):
+            try:
+                result = run_codex(task.prompt or task.title)
+            except Exception as exc:
+                print(f"[proactive] Failed to generate message for task #{task.id}: {exc}")
+                memory_store.mark_task_run(task.id)
+                memory_store.complete_task(task.id)
+                return
+
+            memory_store.mark_task_run(task.id)
+            memory_store.complete_task(task.id)
+
+            channel = task.notify_channel or proactive_config.channel
+            if not channel:
+                print(f"[proactive] No Slack channel configured. Task #{task.id} result skipped.")
+                return
+            app.client.chat_postMessage(channel=channel, text=result.text)
+            for proactive_task in ensure_proactive_tasks(memory_store, proactive_config):
+                scheduler.schedule(proactive_task)
+            return
+
         result = run_codex(task.prompt or task.title)
         memory_store.mark_task_run(task.id)
         if task.run_at:
@@ -121,6 +144,7 @@ def create_app() -> App:
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
     app.client.robopen_scheduler = scheduler  # type: ignore[attr-defined]
+    app.client.robopen_proactive_config = proactive_config  # type: ignore[attr-defined]
     return app
 
 
@@ -293,6 +317,8 @@ def main() -> None:
     app = create_app()
     scheduler = app.client.robopen_scheduler  # type: ignore[attr-defined]
     memory_store = app.client.robopen_memory_store  # type: ignore[attr-defined]
+    proactive_config = app.client.robopen_proactive_config  # type: ignore[attr-defined]
     memory_store.complete_expired_one_shot_tasks()
+    ensure_proactive_tasks(memory_store, proactive_config)
     scheduler.restore(memory_store.list_active_tasks())
     SocketModeHandler(app, required("SLACK_APP_TOKEN")).start()

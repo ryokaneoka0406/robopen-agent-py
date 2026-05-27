@@ -18,6 +18,13 @@ CODEX_CMD=codex
 CODEX_WORKSPACE_DIR=workspace
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
+PROACTIVE_ENABLED=false
+PROACTIVE_CHANNEL=C0123456789
+PROACTIVE_TIMES_PER_DAY=4
+PROACTIVE_WINDOW_START=09:00
+PROACTIVE_WINDOW_END=22:00
+PROACTIVE_MIN_GAP_MINUTES=120
+PROACTIVE_TIMEZONE=Asia/Tokyo
 ```
 
 Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作業ディレクトリとして実行します。
@@ -43,6 +50,23 @@ SSHを切っても動き続け、Raspberry Pi再起動後も自動起動でき�
 
 手順は [documents/raspberry-pi-systemd.md](documents/raspberry-pi-systemd.md) を参照してください。
 短時間の検証には `tmux` も使えますが、常時起動の標準はsystemdです。
+
+## Proactive Check-ins
+
+`PROACTIVE_ENABLED=true` にすると、Botがデフォルト機能として1日4回程度、指定チャンネルへ自然な短文で話しかけます。
+発話先は `PROACTIVE_CHANNEL` を使い、未設定時は `SLACK_LOG_CHANNEL` にfallbackします。
+
+```dotenv
+PROACTIVE_ENABLED=true
+PROACTIVE_CHANNEL=C0123456789
+PROACTIVE_TIMES_PER_DAY=4
+PROACTIVE_WINDOW_START=09:00
+PROACTIVE_WINDOW_END=22:00
+PROACTIVE_MIN_GAP_MINUTES=120
+PROACTIVE_TIMEZONE=Asia/Tokyo
+```
+
+時刻は `PROACTIVE_TIMEZONE` 基準で抽選し、SQLiteの `tasks` にone-shotとして保存されます。
 
 ## Test
 

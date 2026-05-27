@@ -8,6 +8,7 @@ Codex CLIをコアの推論／実行エンジンとしてラップし、Slackか
 
 - Slack上でテキストを送るだけで、Codex CLIの能力（コード実行、ファイル操作、外部API呼び出しなど）を呼び出せる状態を作る。
 - cron的なスケジュール起動と、Slack経由のadhoc起動の両方をサポートする。
+- `.env` で有効化した場合、Botがデフォルト機能として1日4回程度ランダムな時刻にSlackへ自発発話する。
 - Slackスレッド単位の作業ログをSQLiteに永続化し、セッションを跨いだ会話継続と実行履歴の追跡を行う。
 - 破壊的操作（削除系）のみ人間の確認を挟み、それ以外は原則として自律実行する。
 - 人格や行動規約は `workspace/AGENTS.md` としてリポジトリ内に集約し、変更履歴を追える形で管理する。
@@ -45,6 +46,7 @@ flowchart LR
   - approval_guard: 削除系コマンドを検出した際にSlackで確認ボタンを出して承認を待つ。
   - memory_store: SQLiteにSlackスレッド由来の会話ログ、CodexセッションID、スケジュール実行メタデータを保存／検索する。
   - scheduler: 定期実行ジョブを管理し、Wrapperにイベントを流す。
+  - proactive: `.env` の `PROACTIVE_*` 設定に基づき、デフォルト自発発話のone-shotタスクを日次で自動生成する。
 
 ### 5.2 Codex CLI 層
 
@@ -79,6 +81,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - xangiのスケジューリング実装を参考にしつつ、cron式とone-shot実行の両方を扱う。
 - Wrapperプロセス内のジョブキューとして動かし、起動時にtasksテーブルから登録済みジョブを復元する。
 - 実行結果はSlackの所定チャンネル（例: #agent-log）に通知する。
+- デフォルト自発発話は `source_key=proactive:YYYY-MM-DD:n` のone-shotタスクとして保存し、通常のユーザー登録タスクと同じ復元経路に乗せる。投稿形式はScheduled Task見出しを付けず、Codexが生成した自然文だけを送る。
 - **更新 (2026-05-10)**: ユーザー入力はルールベースの固定コマンドだけでなく、自然文（例:「毎朝9時に実行して」）からも登録できるようにする。
   - `schedule_intent_parser` を追加し、LLMで「時点指定（cron/one-shot）」と「実行タスク本文」を抽出する。
   - 抽出結果は構造化JSON（kind/title/prompt/scheduleCron/runAt/confidence）で受け取り、confidence閾値未満は通常会話として扱う。
@@ -108,7 +111,15 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 2. Wrapperが対応するプロンプトを組み立て、Codex CLIに投げる。
 3. 結果をSlackの通知チャンネルに送り、必要ならフォローアップスレッドを開く。
 
-### 6.3 スキル追加
+### 6.3 デフォルト自発発話
+
+1. 起動時に `PROACTIVE_ENABLED=true` かつ投稿先チャンネルが設定されているか確認する。
+2. JSTなど `PROACTIVE_TIMEZONE` 基準で、`PROACTIVE_WINDOW_START` から `PROACTIVE_WINDOW_END` の間に1日4回程度のone-shotタスクを作成する。
+3. 各タスクの実行時、Codex CLIに短い状況確認・作業再開・休憩・予定確認の発話文を生成させる。
+4. 生成に成功した場合は `PROACTIVE_CHANNEL` または `SLACK_LOG_CHANNEL` へ自然文のみ投稿する。失敗した場合はSlack投稿せず、journaldに `[proactive]` prefixで記録する。
+5. 実行済みタスクは `done` にし、翌日分の不足タスクを補充する。
+
+### 6.4 スキル追加
 
 1. ユーザーが「新しいskillを作って」と依頼する。
 2. Codex CLIが `workspace/skills/skill-creator/SKILL.md` を読み、`workspace/skills/` 配下にテンプレートを生成する。
