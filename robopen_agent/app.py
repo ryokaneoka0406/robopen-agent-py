@@ -187,7 +187,6 @@ def handle_prompt(
 
     conversation = memory_store.get_or_create_conversation(conversation_key or f"local-{datetime.now().timestamp()}")
     memory_store.append_message(conversation.id, "user", trimmed)
-    reply("処理中です...")
 
     try:
         result = run_codex(trimmed, conversation.codex_rollout_id)
