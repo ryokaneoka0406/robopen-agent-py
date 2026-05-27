@@ -1,3 +1,5 @@
+import sqlite3
+
 from robopen_agent.memory_store import MemoryStore
 
 
@@ -70,5 +72,44 @@ def test_complete_expired_one_shot_tasks(tmp_path):
         assert expired.id not in active_ids
         assert future.id in active_ids
         assert cron.id in active_ids
+    finally:
+        store.close()
+
+
+def test_deprecated_preferences_and_audit_logs_tables_are_removed(tmp_path):
+    db_path = tmp_path / "agent.db"
+    db = sqlite3.connect(db_path)
+    try:
+        db.executescript(
+            """
+            CREATE TABLE preferences (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE audit_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              action TEXT NOT NULL,
+              target TEXT,
+              approved_by TEXT,
+              created_at TEXT NOT NULL
+            );
+            """
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    store = MemoryStore(str(db_path))
+    try:
+        table_names = {
+            row["name"]
+            for row in store.db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+
+        assert "preferences" not in table_names
+        assert "audit_logs" not in table_names
     finally:
         store.close()

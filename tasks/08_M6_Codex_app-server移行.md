@@ -4,7 +4,7 @@
 - `runCodex` を `codex exec`（非対話プロセス起動）から Codex app-server / MCP 接続ベースに置き換える。
 - `thread/start` で `approvalPolicy: "on-request"`、`sandbox: "workspace-write"` を指定し、Codex が発火する approval 要求イベントを受け取れるようにする。
 - approval 要求イベントを Slack の Block Kit ボタン（Approve / Deny）に橋渡しし、ユーザー判断を Codex に返却する経路を実装する。
-- タイムアウト時の自動キャンセルと `audit_logs` への記録（`approval_requested` / `approval_approved` / `approval_denied` / `approval_timeout`）を実装する。
+- タイムアウト時の自動キャンセルとSlackスレッド上の承認イベント記録（`approval_requested` / `approval_approved` / `approval_denied` / `approval_timeout`）を実装する。
 - 既存の会話履歴／`sessionId` 管理ロジックを app-server スレッドに合わせて再構成する。
 
 ## 現状仕様
@@ -23,7 +23,7 @@
 - `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` を受け取り、実コマンド・ファイル変更単位で Slack 承認 UI を出せる。
 - `thread/start` / `turn/start` で `approvalPolicy: "on-request"`、sandbox、approval reviewer を指定できる。
 - 常駐サーバー化により、毎回 `codex exec` を起動するレイテンシやプロセス管理の粗さを下げられる可能性がある。
-- turn / item / token usage / diff / output delta などのイベントを拾えるため、Slack への進捗表示や `audit_logs` を精密化できる。
+- turn / item / token usage / diff / output delta などのイベントを拾えるため、Slack への進捗表示やSQLite上のSlack作業ログを精密化できる。
 
 ## デメリット・リスク
 - app-server プロトコルは experimental で変更リスクがある。CLI バージョン固定と protocol adapter が必要。
@@ -41,7 +41,7 @@
 
 ## 完了条件
 - ユーザー入力テキストへの正規表現マッチに依存せず、Codex が実行しようとする削除系コマンドに対して必ず Slack 承認 UI が出ること。
-- Approve / Deny / タイムアウト の各経路で audit_logs に記録が残ること。
+- Approve / Deny / タイムアウト の各経路でSlackスレッドに記録が残り、その投稿がSQLiteの作業ログとして保存されること。
 - M3 の完了条件「rm系操作で必ず確認が走る」を実コマンド単位で満たすこと。
 - 既存の Slack 会話継続と Scheduler 実行が app-server 移行後も壊れないこと。
 - app-server 依存箇所が adapter に閉じており、CLI プロトコル変更時の修正範囲が限定されていること。
