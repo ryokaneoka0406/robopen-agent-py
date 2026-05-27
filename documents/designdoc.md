@@ -51,7 +51,7 @@ flowchart LR
 ### 5.2 Codex CLI 層
 
 - `workspace/AGENTS.md` に人格、口調、安全規約、よく使うショートカットを記述する。
-- Codex CLIの作業ディレクトリは `workspace/` に切り出し、Wrapper本体・設計文書・タスク管理ファイルへの意図しない変更を避ける。運用時に別ディレクトリへ分離したい場合は `CODEX_WORKSPACE_DIR` で上書きする。
+- Codex CLIの作業ディレクトリは `workspace/` に切り出し、Wrapper本体・設計文書・タスク管理ファイルへの意図しない変更を避ける。運用時に別ディレクトリへ分離したい場合は `CODEX_WORKSPACE_DIR` で上書きする。Codexにworkspace内の書き込みを許可する場合は `CODEX_SANDBOX=workspace-write` を明示する。
 - Skillsは `workspace/skills/` ディレクトリに配置し、Codex CLIから呼び出せる形にしておく。一覧とトリガーフレーズは `workspace/skills/README.md` で管理する。
 - Codexがセッション開始時に読む補助記憶として `workspace/MEMORY.md` と `workspace/diary/yyyymmdd.md` を用意する。エージェントの人格、行動規約、長期記憶、日記、スキルは `workspace/` に集約し、SQLiteはSlackの作業ログとWrapperの復元用メタデータに限定する。
 - 「スキルを作るスキル」をひとつ用意し、新しいskillの雛形生成・登録までを自動化する。
@@ -139,7 +139,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - Raspberry Piにリポジトリを配置し、`uv sync` で依存関係を同期する。
 - 標準起動コマンドは `uv run robopen-agent` とする。`uv run python -m robopen_agent` は代替起動手段として扱う。
 - 本番運用では `robopen-agent.service` をsystemdに登録し、SSH切断後も常駐させる。Raspberry Pi再起動後は `systemctl enable` により自動起動する。
-- systemd unitは `EnvironmentFile` で `.env` を読み込み、Slack token、`CODEX_CMD`、`CODEX_WORKSPACE_DIR`、`SQLITE_PATH`、`SLACK_LOG_CHANNEL` を注入する。
+- systemd unitは `EnvironmentFile` で `.env` を読み込み、Slack token、`CODEX_CMD`、`CODEX_WORKSPACE_DIR`、`CODEX_SANDBOX`、`SQLITE_PATH`、`SLACK_LOG_CHANNEL` を注入する。
 - ログはjournaldで確認する。標準の確認コマンドは `journalctl -u robopen-agent -f` とする。
 - SQLiteは `data/agent.db` を標準配置とし、日次バックアップと復元手順を運用ドキュメントで管理する。
 - コンテナ運用は当面の標準運用から外し、必要になった場合の将来検討扱いにする。

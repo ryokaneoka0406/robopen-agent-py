@@ -56,3 +56,65 @@ def test_relative_workspace_override_is_project_root_relative(monkeypatch):
     assert codex_runner.get_codex_workspace_dir() == (
         codex_runner.PROJECT_ROOT / "custom-workspace"
     ).resolve()
+
+
+def test_run_codex_adds_sandbox_option(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        out_file = Path(args[0][args[0].index("--output-last-message") + 1])
+        out_file.write_text("ok", encoding="utf-8")
+        return CompletedProcessStub()
+
+    monkeypatch.setenv("CODEX_SANDBOX", "workspace-write")
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    codex_runner.run_codex("hello")
+
+    assert captured["args"][0:4] == ["codex", "exec", "--sandbox", "workspace-write"]
+
+
+def test_run_codex_adds_skip_git_repo_check(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        out_file = Path(args[0][args[0].index("--output-last-message") + 1])
+        out_file.write_text("ok", encoding="utf-8")
+        return CompletedProcessStub()
+
+    monkeypatch.setenv("CODEX_SKIP_GIT_REPO_CHECK", "true")
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    codex_runner.run_codex("hello")
+
+    assert "--skip-git-repo-check" in captured["args"]
+
+
+def test_run_codex_keeps_codex_cmd_as_binary_path(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        out_file = Path(args[0][args[0].index("--output-last-message") + 1])
+        out_file.write_text("ok", encoding="utf-8")
+        return CompletedProcessStub()
+
+    monkeypatch.setenv("CODEX_CMD", "/home/ryopenguin2/.local/bin/codex")
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    codex_runner.run_codex("hello")
+
+    assert captured["args"][0] == "/home/ryopenguin2/.local/bin/codex"
+
+
+def test_run_codex_rejects_invalid_sandbox(monkeypatch):
+    monkeypatch.setenv("CODEX_SANDBOX", "invalid")
+
+    try:
+        codex_runner.run_codex("hello")
+    except ValueError as exc:
+        assert "Invalid CODEX_SANDBOX" in str(exc)
+    else:
+        raise AssertionError("Expected invalid CODEX_SANDBOX to raise ValueError")

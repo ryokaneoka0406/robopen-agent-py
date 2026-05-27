@@ -23,7 +23,7 @@
   - `uv run robopen-agent` で起動できるコンソールスクリプトを定義。
   - 依存として `slack-bolt` / `python-dotenv` を追加。
 - `.env.example`
-  - `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` / `CODEX_CMD` の設定例を追加。
+  - `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` / `CODEX_CMD` / `CODEX_SANDBOX` の設定例を追加。
 
 ### 2. 最小フロー（M0スコープ）
 1. Slack Socket ModeでDM/メンションイベントを受信。

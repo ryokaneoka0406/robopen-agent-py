@@ -16,6 +16,8 @@ SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 CODEX_CMD=codex
 CODEX_WORKSPACE_DIR=workspace
+CODEX_SANDBOX=workspace-write
+CODEX_SKIP_GIT_REPO_CHECK=false
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
 PROACTIVE_ENABLED=false
@@ -29,6 +31,8 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 
 Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作業ディレクトリとして実行します。
 必要に応じて `CODEX_WORKSPACE_DIR` に絶対パス、または起動ディレクトリからの相対パスを指定して変更できます。
+`CODEX_SANDBOX=workspace-write` を設定すると、Codexは `CODEX_WORKSPACE_DIR` 配下へ書き込めます。
+runtime workspaceをgit管理しない場合は `CODEX_SKIP_GIT_REPO_CHECK=true` を設定できます。
 `.env` にはSlack tokenなどのsecretを含むため、リポジトリへコミットしないでください。
 
 ## Run
@@ -50,6 +54,17 @@ SSHを切っても動き続け、Raspberry Pi再起動後も自動起動でき�
 
 手順は [documents/raspberry-pi-systemd.md](documents/raspberry-pi-systemd.md) を参照してください。
 短時間の検証には `tmux` も使えますが、常時起動の標準はsystemdです。
+
+Raspberry Pi上でruntime workspaceへ書き込ませる場合は、`.env` を絶対パスで設定します。
+
+```dotenv
+CODEX_CMD=/home/ryopenguin2/.local/bin/codex
+CODEX_WORKSPACE_DIR=/home/ryopenguin2/robopen-workspace
+CODEX_SANDBOX=workspace-write
+CODEX_SKIP_GIT_REPO_CHECK=false
+```
+
+`robopen-workspace` をgit管理しない場合は `CODEX_SKIP_GIT_REPO_CHECK=true` にしてください。
 
 ## Proactive Check-ins
 

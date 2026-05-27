@@ -11,6 +11,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CODEX_WORKSPACE_DIR = PROJECT_ROOT / "workspace"
+ALLOWED_SANDBOXES = {"read-only", "workspace-write", "danger-full-access"}
 
 
 @dataclass(frozen=True)
@@ -35,10 +36,16 @@ def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
     codex_cmd = os.environ.get("CODEX_CMD", "codex")
     workspace_dir = get_codex_workspace_dir()
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    sandbox = _get_codex_sandbox()
+    skip_git_repo_check = _get_skip_git_repo_check()
     tmp_dir = Path(tempfile.mkdtemp(prefix="codex-"))
     out_file = tmp_dir / "last.txt"
 
     args = [codex_cmd, "exec"]
+    if sandbox:
+        args.extend(["--sandbox", sandbox])
+    if skip_git_repo_check:
+        args.append("--skip-git-repo-check")
     if session_id:
         args.extend(["resume", session_id])
     args.extend(["--json", "--output-last-message", str(out_file), "-"])
@@ -81,3 +88,21 @@ def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
         raise RuntimeError(f"Failed to start Codex CLI: {exc}") from exc
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _get_codex_sandbox() -> str | None:
+    sandbox = os.environ.get("CODEX_SANDBOX")
+    if not sandbox:
+        return None
+    sandbox = sandbox.strip()
+    if not sandbox:
+        return None
+    if sandbox not in ALLOWED_SANDBOXES:
+        allowed = ", ".join(sorted(ALLOWED_SANDBOXES))
+        raise ValueError(f"Invalid CODEX_SANDBOX: {sandbox}. Allowed values: {allowed}")
+    return sandbox
+
+
+def _get_skip_git_repo_check() -> bool:
+    value = os.environ.get("CODEX_SKIP_GIT_REPO_CHECK")
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}

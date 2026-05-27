@@ -32,8 +32,10 @@ cp .env.example .env
 ```dotenv
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-CODEX_CMD=codex
-CODEX_WORKSPACE_DIR=workspace
+CODEX_CMD=/home/<user>/.local/bin/codex
+CODEX_WORKSPACE_DIR=/home/<user>/robopen-workspace
+CODEX_SANDBOX=workspace-write
+CODEX_SKIP_GIT_REPO_CHECK=false
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
 PROACTIVE_ENABLED=false
@@ -60,6 +62,22 @@ pwd
 - uv path: `/home/<user>/.local/bin/uv`
 
 実環境で異なる場合は、systemd unit内の `User`、`WorkingDirectory`、`ExecStart`、`EnvironmentFile` を置き換える。
+
+Codexにruntime workspaceへ書き込ませる場合は、Linux権限とCodex sandboxの両方を確認する。
+
+```sh
+mkdir -p /home/<user>/robopen-workspace
+touch /home/<user>/robopen-workspace/write-test.txt
+rm /home/<user>/robopen-workspace/write-test.txt
+```
+
+`touch` が失敗する場合は所有者を修正する。
+
+```sh
+sudo chown -R <user>:<user> /home/<user>/robopen-workspace
+```
+
+runtime workspaceをgit管理しない場合は `.env` で `CODEX_SKIP_GIT_REPO_CHECK=true` にする。`git init` 済みなら `false` のままでよい。
 
 ## 3. 手動疎通確認
 
