@@ -57,7 +57,14 @@ def create_app() -> App:
             if not channel:
                 print(f"[proactive] No Slack channel configured. Task #{task.id} result skipped.")
                 return
-            app.client.chat_postMessage(channel=channel, text=result.text)
+            response = app.client.chat_postMessage(channel=channel, text=result.text)
+            register_bot_started_conversation(
+                memory_store=memory_store,
+                channel=channel,
+                post_response=response,
+                text=result.text,
+                session_id=result.session_id,
+            )
             for proactive_task in ensure_proactive_tasks(memory_store, proactive_config):
                 scheduler.schedule(proactive_task)
             return
@@ -71,9 +78,17 @@ def create_app() -> App:
         if not channel:
             print(f"[scheduler] SLACK_LOG_CHANNEL is not configured. Task #{task.id} result skipped.")
             return
-        app.client.chat_postMessage(
+        posted_text = f":spiral_calendar_pad: *Scheduled Task:* {task.title}\n\n{result.text}"
+        response = app.client.chat_postMessage(
             channel=channel,
-            text=f":spiral_calendar_pad: *Scheduled Task:* {task.title}\n\n{result.text}",
+            text=posted_text,
+        )
+        register_bot_started_conversation(
+            memory_store=memory_store,
+            channel=channel,
+            post_response=response,
+            text=posted_text,
+            session_id=result.session_id,
         )
 
     scheduler = Scheduler(run_scheduled_task)
@@ -226,6 +241,45 @@ def handle_prompt(
 def build_task_registered_message(task: TaskRow) -> str:
     schedule = format_schedule_for_jst(task.schedule_cron, task.run_at)
     return f"タスクが登録できました: #{task.id} {task.title} ({schedule})"
+
+
+def register_bot_started_conversation(
+    *,
+    memory_store: MemoryStore,
+    channel: str,
+    post_response: Any,
+    text: str,
+    session_id: str | None = None,
+) -> None:
+    post_ts = extract_slack_post_ts(post_response)
+    if not post_ts:
+        return
+
+    conversation = memory_store.get_or_create_conversation(build_conversation_key(channel, post_ts))
+    if session_id and session_id != conversation.codex_rollout_id:
+        memory_store.set_codex_rollout_id(conversation.id, session_id)
+    memory_store.append_message(conversation.id, "assistant", text)
+
+
+def extract_slack_post_ts(post_response: Any) -> str | None:
+    if post_response is None:
+        return None
+    if isinstance(post_response, dict):
+        ts = post_response.get("ts")
+        return ts if isinstance(ts, str) and ts else None
+
+    getter = getattr(post_response, "get", None)
+    if callable(getter):
+        ts = getter("ts")
+        if isinstance(ts, str) and ts:
+            return ts
+
+    data = getattr(post_response, "data", None)
+    if isinstance(data, dict):
+        ts = data.get("ts")
+        return ts if isinstance(ts, str) and ts else None
+
+    return None
 
 
 def format_schedule_for_jst(schedule_cron: str | None, run_at: str | None) -> str:
