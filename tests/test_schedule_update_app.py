@@ -1,14 +1,18 @@
 from robopen_agent import app as app_module
 from robopen_agent.memory_store import MemoryStore, TaskRow
-from robopen_agent.schedule_intent_parser import ParsedScheduleUpdateIntent
+from robopen_agent.schedule_intent_parser import ParsedScheduleDeleteIntent, ParsedScheduleUpdateIntent
 
 
 class RecordingScheduler:
     def __init__(self) -> None:
         self.scheduled: list[TaskRow] = []
+        self.unscheduled: list[int] = []
 
     def schedule(self, task: TaskRow) -> None:
         self.scheduled.append(task)
+
+    def unschedule(self, task_id: int) -> None:
+        self.unscheduled.append(task_id)
 
 
 def test_natural_language_update_uses_sqlite_and_reschedules(tmp_path, monkeypatch):
@@ -121,5 +125,106 @@ def test_schedule_list_returns_task_ids(tmp_path):
         assert replies == [
             f"登録済みタスク:\n#{task.id} [active] daily - 毎日 09:00 JST (cron: 0 0 * * * UTC)"
         ]
+    finally:
+        store.close()
+
+
+def test_schedule_delete_command_requires_confirmation_and_cancels_task(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        task = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+
+        app_module.handle_prompt(
+            prompt=f"schedule delete {task.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+        app_module.handle_prompt(
+            prompt=f"schedule delete confirm {task.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert replies == [
+            (
+                f"削除確認: #{task.id} daily (毎日 09:00 JST (cron: 0 0 * * * UTC)) を削除します。\n"
+                f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+            ),
+            f"タスクを削除しました: #{task.id} daily",
+        ]
+        assert store.find_task(task.id).status == "cancelled"  # type: ignore[union-attr]
+        assert scheduler.unscheduled == [task.id]
+        assert pending == {}
+    finally:
+        store.close()
+
+
+def test_schedule_delete_confirm_without_pending_request_does_not_cancel(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        task = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+
+        app_module.handle_prompt(
+            prompt=f"schedule delete confirm {task.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert replies == ["削除確認が見つかりませんでした。先に `schedule delete <task_id>` を送ってください。"]
+        assert store.find_task(task.id).status == "active"  # type: ignore[union-attr]
+        assert scheduler.unscheduled == []
+    finally:
+        store.close()
+
+
+def test_natural_language_delete_requests_confirmation(tmp_path, monkeypatch):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        task = store.create_task(title="朝の要約", prompt="予定を要約する", schedule_cron="0 0 * * *")
+        monkeypatch.setattr(
+            app_module,
+            "parse_schedule_intent_with_ai",
+            lambda _text: ParsedScheduleDeleteIntent(
+                kind="delete",
+                task_id=task.id,
+                confidence=0.9,
+            ),
+        )
+
+        app_module.handle_prompt(
+            prompt=f"#{task.id}を削除して",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert replies == [
+            (
+                f"削除確認: #{task.id} 朝の要約 (毎日 09:00 JST (cron: 0 0 * * * UTC)) を削除します。\n"
+                f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+            )
+        ]
+        assert pending == {"C123:111.222": app_module.PendingScheduleDelete(task_id=task.id)}
+        assert store.find_task(task.id).status == "active"  # type: ignore[union-attr]
     finally:
         store.close()

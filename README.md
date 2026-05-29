@@ -92,6 +92,8 @@ schedule cron <title> | <m h * * d> | <prompt>
 schedule once <title> | <ISO8601 UTC> | <prompt>
 schedule list
 schedule update <task_id> | <m h * * d>
+schedule delete <task_id>
+schedule delete confirm <task_id>
 ```
 
 既存cronタスクの時刻変更は自然文でもできます。
@@ -99,6 +101,13 @@ schedule update <task_id> | <m h * * d>
 ```text
 #12を毎朝8時に変えて
 朝の要約を8時半にして
+```
+
+既存タスクの削除は確認を挟み、実行時は物理削除ではなく `cancelled` にします。
+
+```text
+#12を削除して
+朝の要約を消して
 ```
 
 ## Test

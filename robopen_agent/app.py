@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -14,11 +15,20 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .codex_runner import run_codex
 from .memory_store import MemoryStore, TaskRow
 from .proactive import config_from_env, ensure_proactive_tasks, is_proactive_task
-from .schedule_intent_parser import ParsedScheduleUpdateIntent, parse_schedule_intent_with_ai
+from .schedule_intent_parser import (
+    ParsedScheduleDeleteIntent,
+    ParsedScheduleUpdateIntent,
+    parse_schedule_intent_with_ai,
+)
 from .scheduler import CRON_PATTERN, Scheduler
 
 
 Reply = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class PendingScheduleDelete:
+    task_id: int
 
 
 def required(name: str) -> str:
@@ -33,6 +43,7 @@ def create_app() -> App:
     memory_store = MemoryStore(os.environ.get("SQLITE_PATH", "data/agent.db"))
     proactive_config = config_from_env()
     seen_events: dict[str, float] = {}
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] = {}
 
     app = App(
         token=required("SLACK_BOT_TOKEN"),
@@ -112,6 +123,7 @@ def create_app() -> App:
             user=event.get("user"),
             conversation_key=conversation_key,
             source_key=source_key,
+            pending_schedule_deletions=pending_schedule_deletions,
         )
 
     @app.message(re.compile(".*", re.DOTALL))
@@ -155,6 +167,7 @@ def create_app() -> App:
             user=message.get("user"),
             conversation_key=conversation_key,
             source_key=source_key,
+            pending_schedule_deletions=pending_schedule_deletions,
         )
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
@@ -172,6 +185,7 @@ def handle_prompt(
     user: str | None = None,
     conversation_key: str | None = None,
     source_key: str | None = None,
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
 ) -> None:
     trimmed = (prompt or "").strip()
     if not trimmed:
@@ -180,6 +194,42 @@ def handle_prompt(
 
     if trimmed == "schedule list":
         reply(build_task_list_message(memory_store.list_active_tasks()))
+        return
+
+    if trimmed.startswith("schedule delete confirm "):
+        try:
+            task_id = parse_schedule_delete_confirm_command(
+                trimmed.removeprefix("schedule delete confirm ")
+            )
+        except ValueError as exc:
+            reply(str(exc))
+            return
+        confirm_schedule_delete(
+            task_id=task_id,
+            reply=reply,
+            memory_store=memory_store,
+            scheduler=scheduler,
+            conversation_key=conversation_key,
+            pending_schedule_deletions=pending_schedule_deletions,
+        )
+        return
+
+    if trimmed.startswith("schedule delete "):
+        try:
+            task_id = parse_schedule_delete_command(trimmed.removeprefix("schedule delete "))
+        except ValueError as exc:
+            reply(str(exc))
+            return
+        task = find_active_task_by_id(task_id, memory_store.list_active_tasks())
+        if not task:
+            reply(f"削除対象が見つかりませんでした: #{task_id}")
+            return
+        request_schedule_delete_confirmation(
+            task=task,
+            reply=reply,
+            conversation_key=conversation_key,
+            pending_schedule_deletions=pending_schedule_deletions,
+        )
         return
 
     if trimmed.startswith("schedule update "):
@@ -233,6 +283,15 @@ def handle_prompt(
                 scheduler=scheduler,
             )
             return
+        if isinstance(ai_intent, ParsedScheduleDeleteIntent):
+            request_schedule_delete_from_intent(
+                intent=ai_intent,
+                reply=reply,
+                memory_store=memory_store,
+                conversation_key=conversation_key,
+                pending_schedule_deletions=pending_schedule_deletions,
+            )
+            return
         if source_key and memory_store.find_task_by_source_key(source_key):
             return
         if ai_intent.kind == "cron":
@@ -274,6 +333,18 @@ def build_task_registered_message(task: TaskRow) -> str:
 
 def build_task_updated_message(task: TaskRow) -> str:
     return f"タスクを更新しました: #{task.id} {task.title} ({format_schedule_for_jst(task.schedule_cron, task.run_at)})"
+
+
+def build_task_delete_requested_message(task: TaskRow) -> str:
+    schedule = format_schedule_for_jst(task.schedule_cron, task.run_at)
+    return (
+        f"削除確認: #{task.id} {task.title} ({schedule}) を削除します。\n"
+        f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+    )
+
+
+def build_task_deleted_message(task: TaskRow) -> str:
+    return f"タスクを削除しました: #{task.id} {task.title}"
 
 
 def build_task_list_message(tasks: list[TaskRow]) -> str:
@@ -333,6 +404,67 @@ def update_cron_task_from_intent(
     )
 
 
+def request_schedule_delete_from_intent(
+    *,
+    intent: ParsedScheduleDeleteIntent,
+    reply: Reply,
+    memory_store: MemoryStore,
+    conversation_key: str | None,
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
+) -> None:
+    target = find_delete_target(intent, memory_store.list_active_tasks())
+    if isinstance(target, str):
+        reply(target)
+        return
+    request_schedule_delete_confirmation(
+        task=target,
+        reply=reply,
+        conversation_key=conversation_key,
+        pending_schedule_deletions=pending_schedule_deletions,
+    )
+
+
+def request_schedule_delete_confirmation(
+    *,
+    task: TaskRow,
+    reply: Reply,
+    conversation_key: str | None,
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
+) -> None:
+    if pending_schedule_deletions is not None and conversation_key:
+        pending_schedule_deletions[conversation_key] = PendingScheduleDelete(task_id=task.id)
+    reply(build_task_delete_requested_message(task))
+
+
+def confirm_schedule_delete(
+    *,
+    task_id: int,
+    reply: Reply,
+    memory_store: MemoryStore,
+    scheduler: Scheduler,
+    conversation_key: str | None,
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
+) -> None:
+    if pending_schedule_deletions is not None and conversation_key:
+        pending = pending_schedule_deletions.get(conversation_key)
+        if pending is None or pending.task_id != task_id:
+            reply("削除確認が見つかりませんでした。先に `schedule delete <task_id>` を送ってください。")
+            return
+
+    task = find_active_task_by_id(task_id, memory_store.list_active_tasks())
+    if not task:
+        if pending_schedule_deletions is not None and conversation_key:
+            pending_schedule_deletions.pop(conversation_key, None)
+        reply(f"削除対象が見つかりませんでした: #{task_id}")
+        return
+
+    memory_store.cancel_task(task.id)
+    scheduler.unschedule(task.id)
+    if pending_schedule_deletions is not None and conversation_key:
+        pending_schedule_deletions.pop(conversation_key, None)
+    reply(build_task_deleted_message(task))
+
+
 def find_update_target(
     intent: ParsedScheduleUpdateIntent, tasks: list[TaskRow]
 ) -> TaskRow | str:
@@ -355,6 +487,36 @@ def find_update_target(
     if not matches:
         return f"更新対象のタスクが見つかりませんでした: {query}"
     return "更新対象が複数あります。schedule listでIDを確認して #ID を指定してください。"
+
+
+def find_delete_target(
+    intent: ParsedScheduleDeleteIntent, tasks: list[TaskRow]
+) -> TaskRow | str:
+    if intent.task_id is not None:
+        for task in tasks:
+            if task.id == intent.task_id:
+                return task
+        return f"削除対象が見つかりませんでした: #{intent.task_id}"
+
+    query = (intent.target_query or "").strip()
+    if not query:
+        return "削除対象のタスクを特定できませんでした。schedule listでIDを確認してください。"
+
+    matches = [
+        task for task in tasks if query in task.title or query in task.prompt
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return f"削除対象のタスクが見つかりませんでした: {query}"
+    return "削除対象が複数あります。schedule listでIDを確認して #ID を指定してください。"
+
+
+def find_active_task_by_id(task_id: int, tasks: list[TaskRow]) -> TaskRow | None:
+    for task in tasks:
+        if task.id == task_id:
+            return task
+    return None
 
 
 def register_bot_started_conversation(
@@ -423,7 +585,26 @@ def convert_cron_utc_to_jst_label(cron: str) -> str | None:
 
 
 def looks_like_schedule_intent(text: str) -> bool:
-    return any(hint in text for hint in ["毎", "明日", "明後日", "時", "分", "schedule", "cron", "once", "定期", "実行"])
+    return any(
+        hint in text
+        for hint in [
+            "毎",
+            "明日",
+            "明後日",
+            "時",
+            "分",
+            "schedule",
+            "cron",
+            "once",
+            "定期",
+            "実行",
+            "削除",
+            "消して",
+            "解除",
+            "キャンセル",
+            "delete",
+        ]
+    )
 
 
 def build_conversation_key(channel: str | None, thread_ts: str | None) -> str:
@@ -475,6 +656,26 @@ def parse_schedule_update_command(raw: str) -> tuple[int, str]:
     if task_id <= 0:
         raise ValueError("task_idは1以上の数値で指定してください。")
     return task_id, parts[1]
+
+
+def parse_schedule_delete_command(raw: str) -> int:
+    stripped = raw.strip()
+    if not stripped:
+        raise ValueError("形式: schedule delete <task_id>")
+    try:
+        task_id = int(stripped.removeprefix("#"))
+    except ValueError as exc:
+        raise ValueError("task_idは数値で指定してください。") from exc
+    if task_id <= 0:
+        raise ValueError("task_idは1以上の数値で指定してください。")
+    return task_id
+
+
+def parse_schedule_delete_confirm_command(raw: str) -> int:
+    stripped = raw.strip()
+    if not stripped:
+        raise ValueError("形式: schedule delete confirm <task_id>")
+    return parse_schedule_delete_command(stripped)
 
 
 def is_supported_cron(cron: str) -> bool:

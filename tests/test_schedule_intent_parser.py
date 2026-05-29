@@ -1,5 +1,6 @@
 from robopen_agent.codex_runner import CodexResult
 from robopen_agent.schedule_intent_parser import (
+    ParsedScheduleDeleteIntent,
     ParsedScheduleIntent,
     ParsedScheduleUpdateIntent,
     parse_schedule_intent_with_ai,
@@ -59,3 +60,35 @@ def test_parse_create_intent_still_returns_create_intent(monkeypatch):
     assert intent.kind == "cron"
     assert intent.title == "朝の要約"
     assert intent.schedule_cron == "0 0 * * *"
+
+
+def test_parse_delete_intent_with_task_id(monkeypatch):
+    monkeypatch.setattr(
+        schedule_intent_parser,
+        "run_codex",
+        lambda _prompt: CodexResult(
+            '{"kind":"delete","taskId":12,"targetQuery":null,"confidence":0.9}'
+        ),
+    )
+
+    intent = parse_schedule_intent_with_ai("#12を削除して")
+
+    assert isinstance(intent, ParsedScheduleDeleteIntent)
+    assert intent.task_id == 12
+    assert intent.target_query is None
+
+
+def test_parse_delete_intent_with_target_query(monkeypatch):
+    monkeypatch.setattr(
+        schedule_intent_parser,
+        "run_codex",
+        lambda _prompt: CodexResult(
+            '{"kind":"delete","taskId":null,"targetQuery":"朝の要約","confidence":0.9}'
+        ),
+    )
+
+    intent = parse_schedule_intent_with_ai("朝の要約を消して")
+
+    assert isinstance(intent, ParsedScheduleDeleteIntent)
+    assert intent.task_id is None
+    assert intent.target_query == "朝の要約"
