@@ -108,6 +108,8 @@ schedule delete confirm <task_id>
 ```text
 #12を削除して
 朝の要約を消して
+はい
+やっぱりやめて
 ```
 
 ## Test

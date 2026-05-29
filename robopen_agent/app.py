@@ -192,6 +192,26 @@ def handle_prompt(
         reply("入力が空です。メッセージを送ってください。")
         return
 
+    pending_delete = find_pending_schedule_delete(
+        conversation_key=conversation_key,
+        pending_schedule_deletions=pending_schedule_deletions,
+    )
+    if pending_delete and is_schedule_delete_denial(trimmed):
+        if pending_schedule_deletions is not None and conversation_key:
+            pending_schedule_deletions.pop(conversation_key, None)
+        reply("タスク削除をキャンセルしました。")
+        return
+    if pending_delete and is_schedule_delete_confirmation(trimmed, pending_delete.task_id):
+        confirm_schedule_delete(
+            task_id=pending_delete.task_id,
+            reply=reply,
+            memory_store=memory_store,
+            scheduler=scheduler,
+            conversation_key=conversation_key,
+            pending_schedule_deletions=pending_schedule_deletions,
+        )
+        return
+
     if trimmed == "schedule list":
         reply(build_task_list_message(memory_store.list_active_tasks()))
         return
@@ -339,7 +359,7 @@ def build_task_delete_requested_message(task: TaskRow) -> str:
     schedule = format_schedule_for_jst(task.schedule_cron, task.run_at)
     return (
         f"削除確認: #{task.id} {task.title} ({schedule}) を削除します。\n"
-        f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+        f"実行する場合は `schedule delete confirm {task.id}`、または `はい` / `削除して` と返信してください。"
     )
 
 
@@ -463,6 +483,84 @@ def confirm_schedule_delete(
     if pending_schedule_deletions is not None and conversation_key:
         pending_schedule_deletions.pop(conversation_key, None)
     reply(build_task_deleted_message(task))
+
+
+def find_pending_schedule_delete(
+    *,
+    conversation_key: str | None,
+    pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
+) -> PendingScheduleDelete | None:
+    if pending_schedule_deletions is None or not conversation_key:
+        return None
+    return pending_schedule_deletions.get(conversation_key)
+
+
+def is_schedule_delete_confirmation(text: str, pending_task_id: int) -> bool:
+    task_id = extract_task_id_reference(text)
+    if task_id is not None and task_id != pending_task_id:
+        return False
+
+    normalized = text.strip().lower()
+    confirmations = {
+        "yes",
+        "y",
+        "ok",
+        "okay",
+        "confirm",
+        "はい",
+        "うん",
+        "お願い",
+        "お願いします",
+        "実行",
+        "実行して",
+        "削除",
+        "削除して",
+        "消して",
+        "確定",
+        "確定して",
+    }
+    if normalized in confirmations:
+        return True
+
+    return any(
+        phrase in text
+        for phrase in [
+            "削除していい",
+            "削除を実行",
+            "削除を確定",
+            "消していい",
+            "実行していい",
+            "そのまま実行",
+            "それでお願い",
+        ]
+    )
+
+
+def is_schedule_delete_denial(text: str) -> bool:
+    normalized = text.strip().lower()
+    denials = {
+        "no",
+        "n",
+        "cancel",
+        "deny",
+        "いいえ",
+        "いや",
+        "キャンセル",
+        "やめて",
+        "中止",
+        "取り消し",
+        "取消",
+    }
+    if normalized in denials:
+        return True
+    return any(phrase in text for phrase in ["削除しない", "やっぱりやめ", "取り消して", "中止して"])
+
+
+def extract_task_id_reference(text: str) -> int | None:
+    match = re.search(r"#?(\d+)", text)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def find_update_target(

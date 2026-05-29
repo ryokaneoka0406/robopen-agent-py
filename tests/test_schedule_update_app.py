@@ -157,7 +157,7 @@ def test_schedule_delete_command_requires_confirmation_and_cancels_task(tmp_path
         assert replies == [
             (
                 f"削除確認: #{task.id} daily (毎日 09:00 JST (cron: 0 0 * * * UTC)) を削除します。\n"
-                f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+                f"実行する場合は `schedule delete confirm {task.id}`、または `はい` / `削除して` と返信してください。"
             ),
             f"タスクを削除しました: #{task.id} daily",
         ]
@@ -221,10 +221,119 @@ def test_natural_language_delete_requests_confirmation(tmp_path, monkeypatch):
         assert replies == [
             (
                 f"削除確認: #{task.id} 朝の要約 (毎日 09:00 JST (cron: 0 0 * * * UTC)) を削除します。\n"
-                f"実行する場合は `schedule delete confirm {task.id}` と返信してください。"
+                f"実行する場合は `schedule delete confirm {task.id}`、または `はい` / `削除して` と返信してください。"
             )
         ]
         assert pending == {"C123:111.222": app_module.PendingScheduleDelete(task_id=task.id)}
         assert store.find_task(task.id).status == "active"  # type: ignore[union-attr]
+    finally:
+        store.close()
+
+
+def test_natural_language_delete_can_be_confirmed_with_yes(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        task = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+
+        app_module.handle_prompt(
+            prompt=f"schedule delete {task.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+        app_module.handle_prompt(
+            prompt="はい",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert replies[-1] == f"タスクを削除しました: #{task.id} daily"
+        assert store.find_task(task.id).status == "cancelled"  # type: ignore[union-attr]
+        assert scheduler.unscheduled == [task.id]
+        assert pending == {}
+    finally:
+        store.close()
+
+
+def test_pending_delete_can_be_denied_with_natural_language(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        task = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+
+        app_module.handle_prompt(
+            prompt=f"schedule delete {task.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+        app_module.handle_prompt(
+            prompt="やっぱりやめて",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert replies[-1] == "タスク削除をキャンセルしました。"
+        assert store.find_task(task.id).status == "active"  # type: ignore[union-attr]
+        assert scheduler.unscheduled == []
+        assert pending == {}
+    finally:
+        store.close()
+
+
+def test_pending_delete_confirmation_does_not_confirm_different_task_id(tmp_path, monkeypatch):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = RecordingScheduler()
+    replies: list[str] = []
+    pending: dict[str, app_module.PendingScheduleDelete] = {}
+    try:
+        first = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+        second = store.create_task(title="weekly", prompt="run", schedule_cron="0 0 * * *")
+        monkeypatch.setattr(
+            app_module,
+            "parse_schedule_intent_with_ai",
+            lambda _text: ParsedScheduleDeleteIntent(
+                kind="delete",
+                task_id=second.id,
+                confidence=0.9,
+            ),
+        )
+
+        app_module.handle_prompt(
+            prompt=f"schedule delete {first.id}",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+        app_module.handle_prompt(
+            prompt=f"#{second.id}を削除して",
+            reply=replies.append,
+            memory_store=store,
+            scheduler=scheduler,  # type: ignore[arg-type]
+            conversation_key="C123:111.222",
+            pending_schedule_deletions=pending,
+        )
+
+        assert store.find_task(first.id).status == "active"  # type: ignore[union-attr]
+        assert store.find_task(second.id).status == "active"  # type: ignore[union-attr]
+        assert pending == {"C123:111.222": app_module.PendingScheduleDelete(task_id=second.id)}
+        assert scheduler.unscheduled == []
     finally:
         store.close()
