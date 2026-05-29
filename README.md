@@ -83,6 +83,24 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 
 時刻は `PROACTIVE_TIMEZONE` 基準で抽選し、SQLiteの `tasks` にone-shotとして保存されます。
 
+## Schedule Commands
+
+Slackから以下の形式でスケジュールを操作できます。cron設定はSQLiteの `tasks` を唯一の正として保存し、Codex workspaceには複製しません。
+
+```text
+schedule cron <title> | <m h * * d> | <prompt>
+schedule once <title> | <ISO8601 UTC> | <prompt>
+schedule list
+schedule update <task_id> | <m h * * d>
+```
+
+既存cronタスクの時刻変更は自然文でもできます。
+
+```text
+#12を毎朝8時に変えて
+朝の要約を8時半にして
+```
+
 ## Test
 
 ```sh

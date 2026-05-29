@@ -36,6 +36,25 @@ def test_task_lifecycle(tmp_path):
         store.close()
 
 
+def test_update_cron_task_only_updates_active_cron_tasks(tmp_path):
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    try:
+        cron = store.create_task(title="daily", prompt="run", schedule_cron="0 0 * * *")
+        once = store.create_task(title="once", prompt="run", run_at="2026-05-20T12:00:00Z")
+        cancelled = store.create_task(title="old", prompt="run", schedule_cron="0 1 * * *")
+        store.cancel_task(cancelled.id)
+
+        updated = store.update_cron_task(cron.id, "0 23 * * *")
+
+        assert updated is not None
+        assert updated.schedule_cron == "0 23 * * *"
+        assert store.update_cron_task(once.id, "0 23 * * *") is None
+        assert store.update_cron_task(cancelled.id, "0 23 * * *") is None
+        assert store.update_cron_task(999, "0 23 * * *") is None
+    finally:
+        store.close()
+
+
 def test_task_source_key_is_idempotent(tmp_path):
     store = MemoryStore(str(tmp_path / "agent.db"))
     try:

@@ -17,17 +17,32 @@ class ParsedScheduleIntent:
     run_at: str | None = None
 
 
-def parse_schedule_intent_with_ai(input_text: str) -> ParsedScheduleIntent | None:
+@dataclass(frozen=True)
+class ParsedScheduleUpdateIntent:
+    kind: Literal["update"]
+    schedule_cron: str
+    confidence: float
+    task_id: int | None = None
+    target_query: str | None = None
+
+
+ScheduleIntent = ParsedScheduleIntent | ParsedScheduleUpdateIntent
+
+
+def parse_schedule_intent_with_ai(input_text: str) -> ScheduleIntent | None:
     parsing_prompt = "\n".join(
         [
-            "あなたはスケジューラ登録の抽出器です。",
-            "ユーザー入力から「実行時点」と「実行タスク」を抽出してください。",
+            "あなたはスケジューラ操作の抽出器です。",
+            "ユーザー入力から「新規登録」または「既存cronタスクの時刻変更」を抽出してください。",
             "出力はJSONのみ。余計な文章は禁止。",
             "フォーマット:",
-            '{"kind":"cron|once","title":"...","prompt":"...","scheduleCron":"m h * * d"|null,"runAt":"ISO8601 UTC"|null,"confidence":0.0}',
+            '{"kind":"cron|once|update","title":"...","prompt":"...","scheduleCron":"m h * * d"|null,"runAt":"ISO8601 UTC"|null,"taskId":123|null,"targetQuery":"..."|null,"confidence":0.0}',
             "ルール:",
             "- 「毎朝9時」「毎日21時」など反復は kind=cron, UTCの5フィールドcronに変換。",
             "- 「明日9時」「2026-05-11 09:00」など単発は kind=once, runAtはUTCのISO8601。",
+            "- 「#12を毎朝8時に変えて」のような既存タスク変更は kind=update, taskId=12, scheduleCronを設定。",
+            "- 「朝の要約を8時半にして」のような既存タスク変更は kind=update, targetQueryに対象名, scheduleCronを設定。",
+            "- updateではtitle/prompt/runAtはnullまたは空文字でよい。",
             "- titleは短い要約。promptは実行してほしい本文。",
             '- スケジュール意図が無ければ {"kind":"none","confidence":0} を返す。',
             f"入力: {input_text}",
@@ -46,6 +61,24 @@ def parse_schedule_intent_with_ai(input_text: str) -> ParsedScheduleIntent | Non
     confidence = parsed.get("confidence")
     if not isinstance(confidence, (int, float)) or confidence < 0.6:
         return None
+
+    schedule_cron = parsed.get("scheduleCron")
+    if parsed.get("kind") == "update" and isinstance(schedule_cron, str) and schedule_cron:
+        task_id = parsed.get("taskId")
+        target_query = parsed.get("targetQuery")
+        if not isinstance(task_id, int):
+            task_id = None
+        if not isinstance(target_query, str) or not target_query.strip():
+            target_query = None
+        if task_id is None and target_query is None:
+            return None
+        return ParsedScheduleUpdateIntent(
+            kind="update",
+            task_id=task_id,
+            target_query=target_query,
+            schedule_cron=schedule_cron,
+            confidence=float(confidence),
+        )
 
     if parsed.get("kind") == "cron" and parsed.get("title") and parsed.get("prompt") and parsed.get("scheduleCron"):
         return ParsedScheduleIntent(
@@ -66,4 +99,3 @@ def parse_schedule_intent_with_ai(input_text: str) -> ParsedScheduleIntent | Non
         )
 
     return None
-

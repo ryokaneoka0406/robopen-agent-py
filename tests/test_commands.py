@@ -8,6 +8,7 @@ from robopen_agent.app import (
     is_duplicate_event,
     parse_cron_command,
     parse_one_shot_command,
+    parse_schedule_update_command,
 )
 
 
@@ -27,9 +28,15 @@ def test_parse_one_shot_command():
     }
 
 
+def test_parse_schedule_update_command():
+    assert parse_schedule_update_command("12 | 0 23 * * *") == (12, "0 23 * * *")
+
+
 def test_parse_command_rejects_missing_parts():
     with pytest.raises(ValueError):
         parse_cron_command("title | 0 0 * * *")
+    with pytest.raises(ValueError):
+        parse_schedule_update_command("12")
 
 
 def test_format_schedule_for_jst():

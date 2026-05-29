@@ -166,6 +166,10 @@ class MemoryStore:
         rows = self.db.execute("SELECT * FROM tasks WHERE status = 'active'").fetchall()
         return [_task(row) for row in rows]
 
+    def list_tasks(self) -> list[TaskRow]:
+        rows = self.db.execute("SELECT * FROM tasks ORDER BY id").fetchall()
+        return [_task(row) for row in rows]
+
     def find_task_by_source_key(self, source_key: str) -> TaskRow | None:
         row = self.db.execute("SELECT * FROM tasks WHERE source_key = ?", (source_key,)).fetchone()
         return _task(row) if row else None
@@ -203,6 +207,23 @@ class MemoryStore:
     def cancel_task(self, task_id: int) -> None:
         self.db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = ?", (task_id,))
         self.db.commit()
+
+    def update_cron_task(self, task_id: int, schedule_cron: str) -> TaskRow | None:
+        self.db.execute(
+            """
+            UPDATE tasks
+               SET schedule_cron = ?
+             WHERE id = ?
+               AND status = 'active'
+               AND schedule_cron IS NOT NULL
+            """,
+            (schedule_cron, task_id),
+        )
+        self.db.commit()
+        row = self.db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row or row["status"] != "active" or row["schedule_cron"] != schedule_cron:
+            return None
+        return _task(row)
 
     def mark_task_run(self, task_id: int) -> None:
         self.db.execute(

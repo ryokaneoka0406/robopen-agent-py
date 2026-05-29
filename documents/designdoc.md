@@ -82,6 +82,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - Wrapperプロセス内のジョブキューとして動かし、起動時にtasksテーブルから登録済みジョブを復元する。
 - 実行結果はSlackの所定チャンネル（例: #agent-log）に通知する。
 - デフォルト自発発話は `source_key=proactive:YYYY-MM-DD:n` のone-shotタスクとして保存し、通常のユーザー登録タスクと同じ復元経路に乗せる。投稿形式はScheduled Task見出しを付けず、Codexが生成した自然文だけを送る。
+- 既存cronタスクの時刻変更は、Slackの自然文または `schedule update <task_id> | <m h * * d>` からWrapperが解釈し、SQLiteの `tasks.schedule_cron` を直接更新する。cron設定はSQLiteを唯一の正とし、`workspace/` には複製しない。更新後はSchedulerの既存handleを解除し、新しいcronで再登録する。
 - **更新 (2026-05-10)**: ユーザー入力はルールベースの固定コマンドだけでなく、自然文（例:「毎朝9時に実行して」）からも登録できるようにする。
   - `schedule_intent_parser` を追加し、LLMで「時点指定（cron/one-shot）」と「実行タスク本文」を抽出する。
   - 抽出結果は構造化JSON（kind/title/prompt/scheduleCron/runAt/confidence）で受け取り、confidence閾値未満は通常会話として扱う。

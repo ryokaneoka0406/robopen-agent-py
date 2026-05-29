@@ -14,8 +14,8 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .codex_runner import run_codex
 from .memory_store import MemoryStore, TaskRow
 from .proactive import config_from_env, ensure_proactive_tasks, is_proactive_task
-from .schedule_intent_parser import parse_schedule_intent_with_ai
-from .scheduler import Scheduler
+from .schedule_intent_parser import ParsedScheduleUpdateIntent, parse_schedule_intent_with_ai
+from .scheduler import CRON_PATTERN, Scheduler
 
 
 Reply = Callable[[str], None]
@@ -178,32 +178,25 @@ def handle_prompt(
         reply("入力が空です。メッセージを送ってください。")
         return
 
-    ai_intent = None
-    if looks_like_schedule_intent(trimmed):
-        try:
-            ai_intent = parse_schedule_intent_with_ai(trimmed)
-        except Exception:
-            ai_intent = None
+    if trimmed == "schedule list":
+        reply(build_task_list_message(memory_store.list_active_tasks()))
+        return
 
-    if ai_intent:
-        if source_key and memory_store.find_task_by_source_key(source_key):
+    if trimmed.startswith("schedule update "):
+        try:
+            task_id, schedule_cron = parse_schedule_update_command(
+                trimmed.removeprefix("schedule update ")
+            )
+        except ValueError as exc:
+            reply(str(exc))
             return
-        if ai_intent.kind == "cron":
-            task = memory_store.create_task(
-                title=ai_intent.title,
-                prompt=ai_intent.prompt,
-                schedule_cron=ai_intent.schedule_cron,
-                source_key=source_key,
-            )
-        else:
-            task = memory_store.create_task(
-                title=ai_intent.title,
-                prompt=ai_intent.prompt,
-                run_at=ai_intent.run_at,
-                source_key=source_key,
-            )
-        scheduler.schedule(task)
-        reply(build_task_registered_message(task))
+        update_cron_task_from_command(
+            task_id=task_id,
+            schedule_cron=schedule_cron,
+            reply=reply,
+            memory_store=memory_store,
+            scheduler=scheduler,
+        )
         return
 
     if trimmed.startswith("schedule cron "):
@@ -220,6 +213,42 @@ def handle_prompt(
             return
         parsed = parse_one_shot_command(trimmed.removeprefix("schedule once "))
         task = memory_store.create_task(**parsed, source_key=source_key)
+        scheduler.schedule(task)
+        reply(build_task_registered_message(task))
+        return
+
+    ai_intent = None
+    if looks_like_schedule_intent(trimmed):
+        try:
+            ai_intent = parse_schedule_intent_with_ai(trimmed)
+        except Exception:
+            ai_intent = None
+
+    if ai_intent:
+        if isinstance(ai_intent, ParsedScheduleUpdateIntent):
+            update_cron_task_from_intent(
+                intent=ai_intent,
+                reply=reply,
+                memory_store=memory_store,
+                scheduler=scheduler,
+            )
+            return
+        if source_key and memory_store.find_task_by_source_key(source_key):
+            return
+        if ai_intent.kind == "cron":
+            task = memory_store.create_task(
+                title=ai_intent.title,
+                prompt=ai_intent.prompt,
+                schedule_cron=ai_intent.schedule_cron,
+                source_key=source_key,
+            )
+        else:
+            task = memory_store.create_task(
+                title=ai_intent.title,
+                prompt=ai_intent.prompt,
+                run_at=ai_intent.run_at,
+                source_key=source_key,
+            )
         scheduler.schedule(task)
         reply(build_task_registered_message(task))
         return
@@ -241,6 +270,91 @@ def handle_prompt(
 def build_task_registered_message(task: TaskRow) -> str:
     schedule = format_schedule_for_jst(task.schedule_cron, task.run_at)
     return f"タスクが登録できました: #{task.id} {task.title} ({schedule})"
+
+
+def build_task_updated_message(task: TaskRow) -> str:
+    return f"タスクを更新しました: #{task.id} {task.title} ({format_schedule_for_jst(task.schedule_cron, task.run_at)})"
+
+
+def build_task_list_message(tasks: list[TaskRow]) -> str:
+    if not tasks:
+        return "登録済みタスクはありません。"
+    lines = ["登録済みタスク:"]
+    for task in tasks:
+        lines.append(
+            f"#{task.id} [{task.status}] {task.title} - {format_schedule_for_jst(task.schedule_cron, task.run_at)}"
+        )
+    return "\n".join(lines)
+
+
+def update_cron_task_from_command(
+    *,
+    task_id: int,
+    schedule_cron: str,
+    reply: Reply,
+    memory_store: MemoryStore,
+    scheduler: Scheduler,
+) -> None:
+    if not is_supported_cron(schedule_cron):
+        reply('cron形式が不正です。形式: "m h * * d"')
+        return
+
+    task = memory_store.update_cron_task(task_id, schedule_cron)
+    if not task:
+        reply(f"更新できませんでした: #{task_id} はactiveなcronタスクではありません。")
+        return
+
+    scheduler.schedule(task)
+    reply(build_task_updated_message(task))
+
+
+def update_cron_task_from_intent(
+    *,
+    intent: ParsedScheduleUpdateIntent,
+    reply: Reply,
+    memory_store: MemoryStore,
+    scheduler: Scheduler,
+) -> None:
+    if not is_supported_cron(intent.schedule_cron):
+        reply('cron形式が不正です。形式: "m h * * d"')
+        return
+
+    target = find_update_target(intent, memory_store.list_active_tasks())
+    if isinstance(target, str):
+        reply(target)
+        return
+
+    update_cron_task_from_command(
+        task_id=target.id,
+        schedule_cron=intent.schedule_cron,
+        reply=reply,
+        memory_store=memory_store,
+        scheduler=scheduler,
+    )
+
+
+def find_update_target(
+    intent: ParsedScheduleUpdateIntent, tasks: list[TaskRow]
+) -> TaskRow | str:
+    cron_tasks = [task for task in tasks if task.schedule_cron]
+    if intent.task_id is not None:
+        for task in cron_tasks:
+            if task.id == intent.task_id:
+                return task
+        return f"更新できませんでした: #{intent.task_id} はactiveなcronタスクではありません。"
+
+    query = (intent.target_query or "").strip()
+    if not query:
+        return "更新対象のタスクを特定できませんでした。schedule listでIDを確認してください。"
+
+    matches = [
+        task for task in cron_tasks if query in task.title or query in task.prompt
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return f"更新対象のタスクが見つかりませんでした: {query}"
+    return "更新対象が複数あります。schedule listでIDを確認して #ID を指定してください。"
 
 
 def register_bot_started_conversation(
@@ -348,6 +462,23 @@ def parse_cron_command(raw: str) -> dict[str, str]:
 def parse_one_shot_command(raw: str) -> dict[str, str]:
     title, run_at, prompt = _parse_pipe_command(raw, "形式: schedule once <title> | <ISO8601 UTC> | <prompt>")
     return {"title": title, "run_at": run_at, "prompt": prompt}
+
+
+def parse_schedule_update_command(raw: str) -> tuple[int, str]:
+    parts = [part.strip() for part in raw.split("|", 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError("形式: schedule update <task_id> | <m h * * d>")
+    try:
+        task_id = int(parts[0])
+    except ValueError as exc:
+        raise ValueError("task_idは数値で指定してください。") from exc
+    if task_id <= 0:
+        raise ValueError("task_idは1以上の数値で指定してください。")
+    return task_id, parts[1]
+
+
+def is_supported_cron(cron: str) -> bool:
+    return bool(CRON_PATTERN.match(cron))
 
 
 def _parse_pipe_command(raw: str, error_message: str) -> tuple[str, str, str]:
