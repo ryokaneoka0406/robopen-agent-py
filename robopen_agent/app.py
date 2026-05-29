@@ -247,6 +247,7 @@ def handle_prompt(
         request_schedule_delete_confirmation(
             task=task,
             reply=reply,
+            memory_store=memory_store,
             conversation_key=conversation_key,
             pending_schedule_deletions=pending_schedule_deletions,
         )
@@ -439,6 +440,7 @@ def request_schedule_delete_from_intent(
     request_schedule_delete_confirmation(
         task=target,
         reply=reply,
+        memory_store=memory_store,
         conversation_key=conversation_key,
         pending_schedule_deletions=pending_schedule_deletions,
     )
@@ -448,11 +450,14 @@ def request_schedule_delete_confirmation(
     *,
     task: TaskRow,
     reply: Reply,
+    memory_store: MemoryStore,
     conversation_key: str | None,
     pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
 ) -> None:
     if pending_schedule_deletions is not None and conversation_key:
         pending_schedule_deletions[conversation_key] = PendingScheduleDelete(task_id=task.id)
+    if conversation_key:
+        memory_store.get_or_create_conversation(conversation_key)
     reply(build_task_delete_requested_message(task))
 
 

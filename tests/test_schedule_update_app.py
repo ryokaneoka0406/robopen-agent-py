@@ -164,6 +164,7 @@ def test_schedule_delete_command_requires_confirmation_and_cancels_task(tmp_path
         assert store.find_task(task.id).status == "cancelled"  # type: ignore[union-attr]
         assert scheduler.unscheduled == [task.id]
         assert pending == {}
+        assert store.find_conversation_by_thread("C123:111.222") is not None
     finally:
         store.close()
 
@@ -225,6 +226,7 @@ def test_natural_language_delete_requests_confirmation(tmp_path, monkeypatch):
             )
         ]
         assert pending == {"C123:111.222": app_module.PendingScheduleDelete(task_id=task.id)}
+        assert store.find_conversation_by_thread("C123:111.222") is not None
         assert store.find_task(task.id).status == "active"  # type: ignore[union-attr]
     finally:
         store.close()
