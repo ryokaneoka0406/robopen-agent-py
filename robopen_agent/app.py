@@ -13,6 +13,19 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .codex_runner import run_codex
+from .file_sender import (
+    FileSenderError,
+    FileUploadRequest,
+    build_file_list_message,
+    build_upload_log,
+    extract_upload_manifests,
+    get_slack_file_root,
+    list_share_files,
+    parse_file_send_command,
+    parse_natural_file_request,
+    resolve_share_path,
+    upload_file_to_slack,
+)
 from .memory_store import MemoryStore, TaskRow
 from .proactive import config_from_env, ensure_proactive_tasks, is_proactive_task
 from .schedule_intent_parser import (
@@ -124,6 +137,9 @@ def create_app() -> App:
             conversation_key=conversation_key,
             source_key=source_key,
             pending_schedule_deletions=pending_schedule_deletions,
+            slack_client=app.client,
+            slack_channel=event.get("channel"),
+            slack_thread_ts=thread_ts,
         )
 
     @app.message(re.compile(".*", re.DOTALL))
@@ -168,6 +184,9 @@ def create_app() -> App:
             conversation_key=conversation_key,
             source_key=source_key,
             pending_schedule_deletions=pending_schedule_deletions,
+            slack_client=app.client,
+            slack_channel=message.get("channel"),
+            slack_thread_ts=reply_thread_ts,
         )
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
@@ -186,6 +205,9 @@ def handle_prompt(
     conversation_key: str | None = None,
     source_key: str | None = None,
     pending_schedule_deletions: dict[str, PendingScheduleDelete] | None = None,
+    slack_client: Any | None = None,
+    slack_channel: str | None = None,
+    slack_thread_ts: str | None = None,
 ) -> None:
     trimmed = (prompt or "").strip()
     if not trimmed:
@@ -214,6 +236,27 @@ def handle_prompt(
 
     if trimmed == "schedule list":
         reply(build_task_list_message(memory_store.list_active_tasks()))
+        return
+
+    if trimmed == "file list":
+        reply(build_file_list_message(list_share_files()))
+        return
+
+    try:
+        file_send_request = parse_file_send_command(trimmed)
+    except FileSenderError as exc:
+        reply(str(exc))
+        return
+    if file_send_request:
+        upload_file_request(
+            request=file_send_request,
+            reply=reply,
+            memory_store=memory_store,
+            conversation_key=conversation_key,
+            slack_client=slack_client,
+            slack_channel=slack_channel,
+            slack_thread_ts=slack_thread_ts,
+        )
         return
 
     if trimmed.startswith("schedule delete confirm "):
@@ -333,6 +376,22 @@ def handle_prompt(
         reply(build_task_registered_message(task))
         return
 
+    natural_file_request = parse_natural_file_request(trimmed)
+    if isinstance(natural_file_request, str):
+        reply(natural_file_request)
+        return
+    if natural_file_request:
+        upload_file_request(
+            request=natural_file_request,
+            reply=reply,
+            memory_store=memory_store,
+            conversation_key=conversation_key,
+            slack_client=slack_client,
+            slack_channel=slack_channel,
+            slack_thread_ts=slack_thread_ts,
+        )
+        return
+
     conversation = memory_store.get_or_create_conversation(conversation_key or f"local-{datetime.now().timestamp()}")
     memory_store.append_message(conversation.id, "user", trimmed)
 
@@ -340,11 +399,71 @@ def handle_prompt(
         result = run_codex(trimmed, conversation.codex_rollout_id)
         if result.session_id and result.session_id != conversation.codex_rollout_id:
             memory_store.set_codex_rollout_id(conversation.id, result.session_id)
-        memory_store.append_message(conversation.id, "assistant", result.text)
+        try:
+            extraction = extract_upload_manifests(result.text)
+        except FileSenderError as exc:
+            memory_store.append_message(conversation.id, "assistant", result.text)
+            user_prefix = f"<@{user}> " if user else ""
+            reply(f"{user_prefix}{result.text}")
+            reply(f"ファイル送信に失敗しました: {exc}")
+            return
+
+        assistant_text = extraction.text or "(ファイル送信を実行します)"
+        memory_store.append_message(conversation.id, "assistant", assistant_text)
         user_prefix = f"<@{user}> " if user else ""
-        reply(f"{user_prefix}{result.text}")
+        reply(f"{user_prefix}{assistant_text}")
+        for upload_request in extraction.requests:
+            upload_file_request(
+                request=upload_request,
+                reply=reply,
+                memory_store=memory_store,
+                conversation_key=conversation_key,
+                slack_client=slack_client,
+                slack_channel=slack_channel,
+                slack_thread_ts=slack_thread_ts,
+                failure_prefix="ファイル送信に失敗しました",
+            )
     except Exception as exc:
         reply(f"Codex実行でエラーが発生しました: {exc}")
+
+
+def upload_file_request(
+    *,
+    request: FileUploadRequest,
+    reply: Reply,
+    memory_store: MemoryStore,
+    conversation_key: str | None,
+    slack_client: Any | None,
+    slack_channel: str | None,
+    slack_thread_ts: str | None,
+    failure_prefix: str = "ファイル送信に失敗しました",
+) -> None:
+    if slack_client is None or not slack_channel:
+        reply("Slack送信先が特定できないため、ファイルを送信できません。")
+        return
+
+    try:
+        path = resolve_share_path(request.path)
+        result = upload_file_to_slack(
+            client=slack_client,
+            channel=slack_channel,
+            path=path,
+            thread_ts=slack_thread_ts,
+            initial_comment=request.comment,
+        )
+    except Exception as exc:
+        reply(f"{failure_prefix}: {exc}")
+        return
+
+    if conversation_key:
+        conversation = memory_store.get_or_create_conversation(conversation_key)
+        root = get_slack_file_root()
+        try:
+            relative_path = path.relative_to(root).as_posix()
+        except ValueError:
+            relative_path = request.path
+        memory_store.append_message(conversation.id, "assistant", build_upload_log(result, relative_path))
+    reply(f"ファイルを送信しました: {request.path}")
 
 
 def build_task_registered_message(task: TaskRow) -> str:
