@@ -10,6 +10,7 @@
   - 全フェーズ横断だが、初期ドラフトはM0時点から進められる。各マイルストーン完了時に追記レビューする。
 - 04_M3_承認フロー実装 は 08_M6_Codex_app-server移行 完了後に再開する（並行不可）。
 - 09_M2拡張_デフォルト自発発話 は M2 の既存Schedulerを使うため、M4常駐運用と並行して改善可能。
+- 11_WorkspaceファイルSlack送信 は Slack連携の拡張であり、Codex app-server移行とは独立して実装可能。ただし `files:write` scope追加と運用手順更新が必要。
 
 ## 依存関係の推奨順序
 
@@ -20,6 +21,7 @@
 5. 08_M6_Codex_app-server移行
 6. 04_M3_承認フロー実装（M6 完了後に再設計反映で再開）
 7. 07_横断_安全性と運用設計（全期間継続）
+8. 11_WorkspaceファイルSlack送信（M0/M1完了後なら独立実装可能）
 
 
 ## 進捗メモ
@@ -27,3 +29,4 @@
 - 2026-05-14: `04_M3_承認フロー実装` のラッパー側ルールベース実装案（PR #14）をクローズ。承認ゲートは Codex app-server の `approvalPolicy: "on-request"` を Slack に橋渡しする方式へ再設計予定。新規タスク `08_M6_Codex_app-server移行` を起こし、M3 はそれが完了するまで BLOCKED。
 - 2026-05-28: M4の本番運用前提をRaspberry Pi/systemd/uvへ変更。標準起動コマンドは `uv run robopen-agent`。
 - 2026-05-28: `09_M2拡張_デフォルト自発発話` を追加。`.env` で有効化した場合に1日4回程度のproactive one-shot taskを自動生成する。
+- 2026-06-01: `11_WorkspaceファイルSlack送信` を追加。`workspace/share/` 配下のファイルを自然文またはCodexマニフェストからSlackへアップロードする。

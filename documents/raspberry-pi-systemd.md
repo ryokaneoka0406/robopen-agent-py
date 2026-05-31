@@ -36,6 +36,8 @@ CODEX_CMD=/home/<user>/.local/bin/codex
 CODEX_WORKSPACE_DIR=/home/<user>/robopen-workspace
 CODEX_SANDBOX=workspace-write
 CODEX_SKIP_GIT_REPO_CHECK=false
+SLACK_FILE_ROOT=/home/<user>/robopen-workspace/share
+SLACK_FILE_MAX_BYTES=20971520
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
 PROACTIVE_ENABLED=false
@@ -78,6 +80,12 @@ sudo chown -R <user>:<user> /home/<user>/robopen-workspace
 ```
 
 runtime workspaceをgit管理しない場合は `.env` で `CODEX_SKIP_GIT_REPO_CHECK=true` にする。`git init` 済みなら `false` のままでよい。
+
+Slackへworkspaceファイルをアップロードする場合は、Slack AppのBot Token Scopesに `files:write` を追加し、アプリを再インストールする。送信対象は `SLACK_FILE_ROOT` 配下に限定されるため、運用前に専用ディレクトリを作成する。
+
+```sh
+mkdir -p /home/<user>/robopen-workspace/share
+```
 
 ## 3. 手動疎通確認
 
