@@ -34,6 +34,7 @@ from .schedule_intent_parser import (
     parse_schedule_intent_with_ai,
 )
 from .scheduler import CRON_PATTERN, Scheduler
+from .slack_file_receiver import build_prompt_with_slack_files
 
 
 Reply = Callable[[str], None]
@@ -128,8 +129,17 @@ def create_app() -> App:
         def reply(text: str) -> None:
             say(text=text, thread_ts=thread_ts)
 
+        try:
+            prompt = build_prompt_with_slack_files(
+                text=event.get("text"),
+                files=event.get("files"),
+            )
+        except FileSenderError as exc:
+            reply(f"Slack添付ファイルの取得に失敗しました: {exc}")
+            return
+
         handle_prompt(
-            prompt=event.get("text"),
+            prompt=prompt,
             reply=reply,
             memory_store=memory_store,
             scheduler=scheduler,
@@ -146,7 +156,8 @@ def create_app() -> App:
     def handle_message(message: dict[str, Any], body: dict[str, Any], say: Callable[..., Any]) -> None:
         if is_duplicate_event(body, seen_events):
             return
-        if message.get("subtype") or message.get("bot_id"):
+        subtype = message.get("subtype")
+        if message.get("bot_id") or (subtype and subtype != "file_share"):
             return
 
         is_direct_message = message.get("channel_type") == "im"
@@ -175,8 +186,17 @@ def create_app() -> App:
             else:
                 say(text=text)
 
+        try:
+            prompt = build_prompt_with_slack_files(
+                text=text,
+                files=message.get("files"),
+            )
+        except FileSenderError as exc:
+            reply(f"Slack添付ファイルの取得に失敗しました: {exc}")
+            return
+
         handle_prompt(
-            prompt=text,
+            prompt=prompt,
             reply=reply,
             memory_store=memory_store,
             scheduler=scheduler,
