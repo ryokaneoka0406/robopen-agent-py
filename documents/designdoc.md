@@ -139,6 +139,14 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 4. 検証に通った場合のみ、WrapperがSlack SDKの `files_upload_v2` で現在のチャンネルまたはスレッドへアップロードする。
 5. 成功時はSQLiteのmessagesへ `[file_uploaded] <relative_path>` を保存し、Slackからfile id/permalinkが得られた場合は同じログ本文へ含める。
 
+### 6.6 Slack添付ファイルの受信
+
+1. ユーザーがDMまたは追跡済みスレッドにファイルを添付すると、Wrapperは `file_share` subtypeのメッセージも会話入力として扱う。
+2. WrapperはSlack file objectの `url_private_download` または `url_private` をBot Tokenで取得し、`SLACK_INBOUND_FILE_ROOT` 未設定時は `CODEX_WORKSPACE_DIR/inbox/slack/yyyymmdd/` 配下へ保存する。
+3. ファイル名はSlack file idと安全化した元ファイル名から生成し、パストラバーサルや上書きを避ける。
+4. Slack側の申告サイズと実ダウンロードサイズを `SLACK_INBOUND_FILE_MAX_BYTES`（未設定時20MB）で検証し、超過時はSlackへエラーを返してCodex CLIへ渡さない。
+5. Codex CLIへはSlack tokenを渡さず、保存済みファイルのworkspace相対パス、title、mimetype、size、file idを通常プロンプトへ追記する。
+
 ## 7. セキュリティと安全策
 
 - 削除系コマンド、外部送金、外部APIの破壊的操作はすべてapproval_guardで確認を取る。

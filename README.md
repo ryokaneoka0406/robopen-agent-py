@@ -20,6 +20,10 @@ CODEX_SANDBOX=workspace-write
 CODEX_SKIP_GIT_REPO_CHECK=false
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
+SLACK_FILE_ROOT=share
+SLACK_FILE_MAX_BYTES=20971520
+SLACK_INBOUND_FILE_ROOT=inbox/slack
+SLACK_INBOUND_FILE_MAX_BYTES=20971520
 PROACTIVE_ENABLED=false
 PROACTIVE_CHANNEL=C0123456789
 PROACTIVE_TIMES_PER_DAY=4
@@ -33,6 +37,8 @@ Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作�
 必要に応じて `CODEX_WORKSPACE_DIR` に絶対パス、または起動ディレクトリからの相対パスを指定して変更できます。
 `CODEX_SANDBOX=workspace-write` を設定すると、Codexは `CODEX_WORKSPACE_DIR` 配下へ書き込めます。
 runtime workspaceをgit管理しない場合は `CODEX_SKIP_GIT_REPO_CHECK=true` を設定できます。
+Slackへworkspaceファイルを送る場合は `SLACK_FILE_ROOT`、Slackから受け取った添付ファイルの保存先は `SLACK_INBOUND_FILE_ROOT` で指定できます。
+どちらも未設定時は `CODEX_WORKSPACE_DIR` 配下を使い、ファイルサイズ上限は20MBです。
 `.env` にはSlack tokenなどのsecretを含むため、リポジトリへコミットしないでください。
 
 ## Run
