@@ -37,12 +37,15 @@ def run_codex(prompt: str, session_id: str | None = None) -> CodexResult:
     workspace_dir = get_codex_workspace_dir()
     workspace_dir.mkdir(parents=True, exist_ok=True)
     sandbox = _get_codex_sandbox()
+    bypass_approvals_and_sandbox = _get_bypass_approvals_and_sandbox()
     skip_git_repo_check = _get_skip_git_repo_check()
     tmp_dir = Path(tempfile.mkdtemp(prefix="codex-"))
     out_file = tmp_dir / "last.txt"
 
     args = [codex_cmd, "exec"]
-    if sandbox:
+    if bypass_approvals_and_sandbox:
+        args.append("--dangerously-bypass-approvals-and-sandbox")
+    elif sandbox:
         args.extend(["--sandbox", sandbox])
     if skip_git_repo_check:
         args.append("--skip-git-repo-check")
@@ -105,4 +108,9 @@ def _get_codex_sandbox() -> str | None:
 
 def _get_skip_git_repo_check() -> bool:
     value = os.environ.get("CODEX_SKIP_GIT_REPO_CHECK")
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_bypass_approvals_and_sandbox() -> bool:
+    value = os.environ.get("CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX")
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
