@@ -17,6 +17,7 @@ SLACK_APP_TOKEN=xapp-...
 CODEX_CMD=codex
 CODEX_WORKSPACE_DIR=workspace
 CODEX_SANDBOX=workspace-write
+CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=false
 CODEX_SKIP_GIT_REPO_CHECK=false
 SQLITE_PATH=data/agent.db
 SLACK_LOG_CHANNEL=C0123456789
@@ -36,6 +37,7 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 Codex CLI はデフォルトでプロジェクト直下の `workspace/` を作業ディレクトリとして実行します。
 必要に応じて `CODEX_WORKSPACE_DIR` に絶対パス、または起動ディレクトリからの相対パスを指定して変更できます。
 `CODEX_SANDBOX=workspace-write` を設定すると、Codexは `CODEX_WORKSPACE_DIR` 配下へ書き込めます。
+`CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=true` を設定すると、Codex CLIに `--dangerously-bypass-approvals-and-sandbox` を付与し、`CODEX_SANDBOX` より優先します。信頼済みの外部sandboxや専用Raspberry Pi上での自動実行に限定してください。
 runtime workspaceをgit管理しない場合は `CODEX_SKIP_GIT_REPO_CHECK=true` を設定できます。
 Slackへworkspaceファイルを送る場合は `SLACK_FILE_ROOT`、Slackから受け取った添付ファイルの保存先は `SLACK_INBOUND_FILE_ROOT` で指定できます。
 どちらも未設定時は `CODEX_WORKSPACE_DIR` 配下を使い、ファイルサイズ上限は20MBです。
@@ -67,6 +69,7 @@ Raspberry Pi上でruntime workspaceへ書き込ませる場合は、`.env` を�
 CODEX_CMD=/home/ryopenguin2/.local/bin/codex
 CODEX_WORKSPACE_DIR=/home/ryopenguin2/robopen-workspace
 CODEX_SANDBOX=workspace-write
+CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=false
 CODEX_SKIP_GIT_REPO_CHECK=false
 ```
 

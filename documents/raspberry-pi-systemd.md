@@ -35,6 +35,7 @@ SLACK_APP_TOKEN=xapp-...
 CODEX_CMD=/home/<user>/.local/bin/codex
 CODEX_WORKSPACE_DIR=/home/<user>/robopen-workspace
 CODEX_SANDBOX=workspace-write
+CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=false
 CODEX_SKIP_GIT_REPO_CHECK=false
 SLACK_FILE_ROOT=/home/<user>/robopen-workspace/share
 SLACK_FILE_MAX_BYTES=20971520
@@ -80,6 +81,8 @@ sudo chown -R <user>:<user> /home/<user>/robopen-workspace
 ```
 
 runtime workspaceをgit管理しない場合は `.env` で `CODEX_SKIP_GIT_REPO_CHECK=true` にする。`git init` 済みなら `false` のままでよい。
+
+非対話運用でCodexの承認待ちやsandbox制約を完全に外す場合のみ、`.env` で `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=true` にする。この設定は `--dangerously-bypass-approvals-and-sandbox` を付与し、`CODEX_SANDBOX` より優先されるため、専用ユーザー・専用workspace・OS側の権限制限がある環境に限定する。
 
 Slackへworkspaceファイルをアップロードする場合は、Slack AppのBot Token Scopesに `files:write` を追加し、アプリを再インストールする。送信対象は `SLACK_FILE_ROOT` 配下に限定されるため、運用前に専用ディレクトリを作成する。
 

@@ -75,6 +75,25 @@ def test_run_codex_adds_sandbox_option(monkeypatch):
     assert captured["args"][0:4] == ["codex", "exec", "--sandbox", "workspace-write"]
 
 
+def test_run_codex_adds_dangerous_bypass_option(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        out_file = Path(args[0][args[0].index("--output-last-message") + 1])
+        out_file.write_text("ok", encoding="utf-8")
+        return CompletedProcessStub()
+
+    monkeypatch.setenv("CODEX_SANDBOX", "workspace-write")
+    monkeypatch.setenv("CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX", "true")
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+
+    codex_runner.run_codex("hello")
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in captured["args"]
+    assert "--sandbox" not in captured["args"]
+
+
 def test_run_codex_adds_skip_git_repo_check(monkeypatch):
     captured = {}
 
