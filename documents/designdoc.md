@@ -96,7 +96,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - DMとメンションをトリガとして受け付ける。
 - 削除系の確認はinteractive message (Block Kit) のApprove / Denyボタンで行う。
 - workspace内の `share/` 配下にあるファイルをSlackへアップロードできる。送信はWrapper側がSlack Bot Tokenを保持したまま `files_upload_v2` で実行し、Codex CLIへSlack tokenを渡さない。
-- ユーザーの自然文（例: `report.mdを送って`）と、Codex応答末尾の `ROBOPEN_FILE_UPLOAD {"path":"report.md","comment":"..."}` マニフェストを送信トリガとして扱う。送信対象は `SLACK_FILE_ROOT` 配下の相対パスに限定し、root外参照、隠しファイル、ディレクトリ、サイズ超過は拒否する。
+- ユーザーの自然文（例: `report.mdを送って`）と、Codex応答末尾の `ROBOPEN_FILE_UPLOAD {"path":"report.md","comment":"..."}` マニフェストを送信トリガとして扱う。`http://` / `https://` URL内の拡張子らしき文字列はファイル候補から除外し、URLを含む依頼は通常会話としてCodex CLIへ渡す。送信対象は `SLACK_FILE_ROOT` 配下の相対パスに限定し、root外参照、隠しファイル、ディレクトリ、サイズ超過は拒否する。
 
 ## 6. 主要フロー
 
@@ -135,7 +135,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 1. Codex CLIまたはユーザーが `workspace/share/` 配下に送信対象ファイルを用意する。
 2. ユーザーが自然文または `file send <relative_path>` で送信を依頼する。Codexが送信を提案する場合は、応答末尾に `ROBOPEN_FILE_UPLOAD` マニフェストを出力する。
-3. Wrapperが送信対象を `SLACK_FILE_ROOT` 配下の相対パスとして解決し、パストラバーサル、root外symlink、隠しファイル、ディレクトリ、サイズ上限を検証する。
+3. Wrapperは自然文中のURLをファイル候補から除外したうえで、送信対象を `SLACK_FILE_ROOT` 配下の相対パスとして解決し、パストラバーサル、root外symlink、隠しファイル、ディレクトリ、サイズ上限を検証する。
 4. 検証に通った場合のみ、WrapperがSlack SDKの `files_upload_v2` で現在のチャンネルまたはスレッドへアップロードする。
 5. 成功時はSQLiteのmessagesへ `[file_uploaded] <relative_path>` を保存し、Slackからfile id/permalinkが得られた場合は同じログ本文へ含める。
 
@@ -189,3 +189,4 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 - xangi: Slack疎通とスケジューリングの実装を参照。
 - ai-assistant-workspace: 人格設計とメモリ戦略、スキル生成の考え方を参照。
+- 現時点の機能を対象にした正常系・異常系・OS差分の統合テスト項目は `documents/integration-test-plan.md` を参照。

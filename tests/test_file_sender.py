@@ -93,6 +93,30 @@ def test_parse_natural_file_request_reports_ambiguous_filename(tmp_path):
     assert "送信対象が複数あります" in result
 
 
+def test_parse_natural_file_request_ignores_url():
+    result = parse_natural_file_request(
+        "https://huggingface.co/rhasspy/piper-voices\n"
+        "これつかってローカルでTTSして、音声ファイルを貼ってもらう運用にできる？"
+    )
+
+    assert result is None
+
+
+def test_parse_natural_file_request_ignores_url_but_finds_separate_file(tmp_path):
+    root = tmp_path / "share"
+    root.mkdir()
+    (root / "report.md").write_text("report", encoding="utf-8")
+
+    request = parse_natural_file_request(
+        "https://example.com/docs/readme.md を参考に report.mdを送って",
+        root=root,
+    )
+
+    assert request is not None
+    assert not isinstance(request, str)
+    assert request.path == "report.md"
+
+
 def test_extract_upload_manifests_removes_manifest_line():
     extraction = extract_upload_manifests(
         'できました。\nROBOPEN_FILE_UPLOAD {"path":"report.md","comment":"レポートです"}'
@@ -171,6 +195,40 @@ def test_natural_file_request_uploads_to_slack(tmp_path, monkeypatch):
     assert replies == ["ファイルを送信しました: report.md"]
     assert client.uploads[0]["channel"] == "D123"
     assert "thread_ts" not in client.uploads[0]
+    store.close()
+
+
+def test_url_request_reaches_codex_without_being_treated_as_file(tmp_path, monkeypatch):
+    prompt = (
+        "https://huggingface.co/rhasspy/piper-voices\n"
+        "これつかってローカルでTTSして、音声ファイルを貼ってもらう運用にできる？"
+    )
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_run_codex(prompt_text: str, session_id: str | None = None) -> CodexResult:
+        calls.append((prompt_text, session_id))
+        return CodexResult("できます。", "thread-url")
+
+    monkeypatch.setattr(app_module, "run_codex", fake_run_codex)
+
+    store = MemoryStore(str(tmp_path / "agent.db"))
+    scheduler = Scheduler(lambda _task: None)
+    client = FakeSlackClient()
+    replies: list[str] = []
+
+    app_module.handle_prompt(
+        prompt=prompt,
+        reply=replies.append,
+        memory_store=store,
+        scheduler=scheduler,
+        conversation_key="D123:1710000000.000300",
+        slack_client=client,
+        slack_channel="D123",
+    )
+
+    assert calls == [(prompt, None)]
+    assert replies == ["できます。"]
+    assert client.uploads == []
     store.close()
 
 
