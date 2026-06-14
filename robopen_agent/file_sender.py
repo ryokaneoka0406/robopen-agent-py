@@ -14,6 +14,7 @@ DEFAULT_MAX_BYTES = 20 * 1024 * 1024
 UPLOAD_MANIFEST_PREFIX = "ROBOPEN_FILE_UPLOAD "
 FILE_TRIGGER_PATTERN = re.compile(r"(送って|送信|アップロード|貼って|共有)")
 FILE_NAME_PATTERN = re.compile(r"[A-Za-z0-9_./ -]+\.[A-Za-z0-9]{1,12}")
+URL_PATTERN = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+", re.IGNORECASE)
 
 
 class FileSenderError(ValueError):
@@ -152,7 +153,12 @@ def parse_file_send_command(text: str) -> FileUploadRequest | None:
 def parse_natural_file_request(text: str, *, root: Path | None = None) -> FileUploadRequest | str | None:
     if not FILE_TRIGGER_PATTERN.search(text):
         return None
-    candidates = [match.group(0).strip(" .。`'\"") for match in FILE_NAME_PATTERN.finditer(text)]
+    url_spans = [match.span() for match in URL_PATTERN.finditer(text)]
+    candidates = [
+        match.group(0).strip(" .。`'\"")
+        for match in FILE_NAME_PATTERN.finditer(text)
+        if not any(_spans_overlap(match.span(), url_span) for url_span in url_spans)
+    ]
     candidates = [candidate.removeprefix("share/") for candidate in candidates]
     if not candidates:
         return None
@@ -177,6 +183,10 @@ def find_matching_files(requested: str, *, root: Path | None = None) -> list[str
         return basename_matches
     suffix_matches = [path for path in files if path.endswith("/" + requested)]
     return suffix_matches
+
+
+def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    return left[0] < right[1] and right[0] < left[1]
 
 
 def extract_upload_manifests(text: str) -> ManifestExtraction:
