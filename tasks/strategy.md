@@ -31,3 +31,4 @@
 - 2026-05-28: `09_M2拡張_デフォルト自発発話` を追加。`.env` で有効化した場合に1日4回程度のproactive one-shot taskを自動生成する。
 - 2026-06-01: `11_WorkspaceファイルSlack送信` を追加。`workspace/share/` 配下のファイルを自然文またはCodexマニフェストからSlackへアップロードする。
 - 2026-06-12: `13_統合テスト項目整備` を完了。現時点の実装を対象に、正常系・異常系・OS差分を `documents/integration-test-plan.md` へ整理した。
+- 2026-06-15: `11_WorkspaceファイルSlack送信` を補修。scheduled taskとproactive taskでもCodexのファイル送信マニフェストを処理するようにした。

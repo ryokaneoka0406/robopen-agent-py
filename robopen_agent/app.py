@@ -65,6 +65,55 @@ def create_app() -> App:
         token_verification_enabled=False,
     )
 
+    def post_scheduled_result(
+        *,
+        channel: str,
+        result: Any,
+        format_post_text: Callable[[str], str],
+    ) -> None:
+        manifest_error: FileSenderError | None = None
+        try:
+            extraction = extract_upload_manifests(result.text)
+            assistant_text = extraction.text or "(ファイル送信を実行します)"
+        except FileSenderError as exc:
+            extraction = None
+            assistant_text = result.text
+            manifest_error = exc
+
+        posted_text = format_post_text(assistant_text)
+        response = app.client.chat_postMessage(channel=channel, text=posted_text)
+        post_ts = extract_slack_post_ts(response)
+        conversation_key = build_conversation_key(channel, post_ts) if post_ts else None
+        register_bot_started_conversation(
+            memory_store=memory_store,
+            channel=channel,
+            post_response=response,
+            text=posted_text,
+            session_id=result.session_id,
+        )
+
+        def reply(text: str) -> None:
+            kwargs: dict[str, str] = {"channel": channel, "text": text}
+            if post_ts:
+                kwargs["thread_ts"] = post_ts
+            app.client.chat_postMessage(**kwargs)
+
+        if manifest_error:
+            reply(f"ファイル送信に失敗しました: {manifest_error}")
+            return
+
+        for upload_request in extraction.requests:
+            upload_file_request(
+                request=upload_request,
+                reply=reply,
+                memory_store=memory_store,
+                conversation_key=conversation_key,
+                slack_client=app.client,
+                slack_channel=channel,
+                slack_thread_ts=post_ts,
+                failure_prefix="ファイル送信に失敗しました",
+            )
+
     def run_scheduled_task(task: TaskRow) -> None:
         if is_proactive_task(task):
             try:
@@ -82,13 +131,10 @@ def create_app() -> App:
             if not channel:
                 print(f"[proactive] No Slack channel configured. Task #{task.id} result skipped.")
                 return
-            response = app.client.chat_postMessage(channel=channel, text=result.text)
-            register_bot_started_conversation(
-                memory_store=memory_store,
+            post_scheduled_result(
                 channel=channel,
-                post_response=response,
-                text=result.text,
-                session_id=result.session_id,
+                result=result,
+                format_post_text=lambda text: text,
             )
             for proactive_task in ensure_proactive_tasks(memory_store, proactive_config):
                 scheduler.schedule(proactive_task)
@@ -103,17 +149,12 @@ def create_app() -> App:
         if not channel:
             print(f"[scheduler] SLACK_LOG_CHANNEL is not configured. Task #{task.id} result skipped.")
             return
-        posted_text = f":spiral_calendar_pad: *Scheduled Task:* {task.title}\n\n{result.text}"
-        response = app.client.chat_postMessage(
+        post_scheduled_result(
             channel=channel,
-            text=posted_text,
-        )
-        register_bot_started_conversation(
-            memory_store=memory_store,
-            channel=channel,
-            post_response=response,
-            text=posted_text,
-            session_id=result.session_id,
+            result=result,
+            format_post_text=lambda text: (
+                f":spiral_calendar_pad: *Scheduled Task:* {task.title}\n\n{text}"
+            ),
         )
 
     scheduler = Scheduler(run_scheduled_task)

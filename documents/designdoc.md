@@ -114,8 +114,9 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 1. schedulerがtasksの実行時刻を検知する。
 2. Wrapperが対応するプロンプトを組み立て、Codex CLIに投げる。
-3. 結果をSlackの通知チャンネルに送り、必要ならフォローアップスレッドを開く。
+3. Codex結果から `ROBOPEN_FILE_UPLOAD` マニフェストを抽出し、マニフェスト行を除いた本文をSlackの通知チャンネルへ投稿する。マニフェストがある場合は、その投稿のスレッドへ通常会話と同じ検証・アップロード処理でファイルを送信する。
 4. Slack投稿に成功して投稿 `ts` が得られた場合は、`channel:ts` を `slack_thread_ts` として `conversations` に登録し、投稿本文を `assistant` メッセージとして保存する。これにより、ユーザーがその投稿のスレッドで返信した場合は同じCodexセッションとして会話を継続する。
+5. ファイル送信に成功した場合は、同じconversationの `messages` へ `[file_uploaded] <relative_path>` を保存する。
 
 ### 6.3 デフォルト自発発話
 
@@ -123,8 +124,9 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 2. JSTなど `PROACTIVE_TIMEZONE` 基準で、`PROACTIVE_WINDOW_START` から `PROACTIVE_WINDOW_END` の間に1日4回程度のone-shotタスクを作成する。
 3. 各タスクの実行時、Codex CLIに短い状況確認・作業再開・休憩・予定確認の発話文を生成させる。
 4. 生成に成功した場合は `PROACTIVE_CHANNEL` または `SLACK_LOG_CHANNEL` へ自然文のみ投稿する。失敗した場合はSlack投稿せず、journaldに `[proactive]` prefixで記録する。
-5. Slack投稿に成功して投稿 `ts` が得られた場合は、`channel:ts` を `slack_thread_ts` として `conversations` に登録し、自然文の投稿本文を `assistant` メッセージとして保存する。ユーザーがその投稿のスレッドで返信した場合は同じCodexセッションとして会話を継続する。
-6. 実行済みタスクは `done` にし、翌日分の不足タスクを補充する。
+5. 生成結果に `ROBOPEN_FILE_UPLOAD` マニフェストがある場合は、自然文からマニフェスト行を除去し、投稿スレッドへ指定ファイルを送信する。
+6. Slack投稿に成功して投稿 `ts` が得られた場合は、`channel:ts` を `slack_thread_ts` として `conversations` に登録し、自然文の投稿本文を `assistant` メッセージとして保存する。ユーザーがその投稿のスレッドで返信した場合は同じCodexセッションとして会話を継続する。
+7. 実行済みタスクは `done` にし、翌日分の不足タスクを補充する。
 
 ### 6.4 スキル追加
 
