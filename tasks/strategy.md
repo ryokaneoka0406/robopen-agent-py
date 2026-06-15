@@ -11,6 +11,7 @@
 - 04_M3_承認フロー実装 は 08_M6_Codex_app-server移行 完了後に再開する（並行不可）。
 - 09_M2拡張_デフォルト自発発話 は M2 の既存Schedulerを使うため、M4常駐運用と並行して改善可能。
 - 11_WorkspaceファイルSlack送信 は Slack連携の拡張であり、Codex app-server移行とは独立して実装可能。ただし `files:write` scope追加と運用手順更新が必要。
+- 14_GitHub_Actionsテスト自動化 は既存機能から独立して実施できる。以後の各タスクはpull requestでCI成功を確認してからマージする。
 
 ## 依存関係の推奨順序
 
@@ -22,6 +23,7 @@
 6. 04_M3_承認フロー実装（M6 完了後に再設計反映で再開）
 7. 07_横断_安全性と運用設計（全期間継続）
 8. 11_WorkspaceファイルSlack送信（M0/M1完了後なら独立実装可能）
+9. 14_GitHub_Actionsテスト自動化（既存機能から独立して実施可能）
 
 
 ## 進捗メモ
@@ -32,3 +34,4 @@
 - 2026-06-01: `11_WorkspaceファイルSlack送信` を追加。`workspace/share/` 配下のファイルを自然文またはCodexマニフェストからSlackへアップロードする。
 - 2026-06-12: `13_統合テスト項目整備` を完了。現時点の実装を対象に、正常系・異常系・OS差分を `documents/integration-test-plan.md` へ整理した。
 - 2026-06-15: `11_WorkspaceファイルSlack送信` を補修。scheduled taskとproactive taskでもCodexのファイル送信マニフェストを処理するようにした。
+- 2026-06-15: `14_GitHub_Actionsテスト自動化` を完了。pull requestとmainへのpushでPython 3.11-3.14のpytestを実行するCIを追加した。

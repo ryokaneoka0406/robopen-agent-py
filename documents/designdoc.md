@@ -169,6 +169,13 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - SQLiteは `data/agent.db` を標準配置とし、日次バックアップと復元手順を運用ドキュメントで管理する。
 - コンテナ運用は当面の標準運用から外し、必要になった場合の将来検討扱いにする。
 
+### 8.1 継続的インテグレーション
+
+- GitHub Actionsでpull requestとmainブランチへのpushを契機に単体テストを実行する。
+- `uv sync --locked --dev` で `uv.lock` と一致する依存関係を導入し、`uv run --frozen pytest` でロックファイルを変更せずテストする。
+- `requires-python` の下限を含むPython 3.11、3.12、3.13、3.14をテスト対象とする。
+- CIはSlackやCodexの実シークレットを使用せず、GitHub Tokenの権限はリポジトリ内容の読み取りに限定する。
+
 ## 9. 段階的マイルストン
 
 | フェーズ | スコープ | 完了条件 |
