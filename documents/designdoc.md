@@ -80,6 +80,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 
 - xangiのスケジューリング実装を参考にしつつ、cron式とone-shot実行の両方を扱う。
 - Wrapperプロセス内のジョブキューとして動かし、起動時にtasksテーブルから登録済みジョブを復元する。
+- cronはUTC基準の5フィールド `m h dom * dow` を扱う。`dom=1..31` の月次実行、`dow=0..6` の週次実行を許可し、日と曜日の同時指定は曖昧さを避けるため拒否する。
 - 実行結果はSlackの所定チャンネル（例: #agent-log）に通知する。
 - デフォルト自発発話は `source_key=proactive:YYYY-MM-DD:n` のone-shotタスクとして保存し、通常のユーザー登録タスクと同じ復元経路に乗せる。投稿形式はScheduled Task見出しを付けず、Codexが生成した自然文だけを送る。
 - 既存cronタスクの時刻変更は、Slackの自然文または `schedule update <task_id> | <m h * * d>` からWrapperが解釈し、SQLiteの `tasks.schedule_cron` を直接更新する。cron設定はSQLiteを唯一の正とし、`workspace/` には複製しない。更新後はSchedulerの既存handleを解除し、新しいcronで再登録する。

@@ -6,6 +6,7 @@ from robopen_agent.app import (
     convert_cron_utc_to_jst_label,
     format_schedule_for_jst,
     is_duplicate_event,
+    is_supported_cron,
     parse_cron_command,
     parse_one_shot_command,
     parse_schedule_update_command,
@@ -45,6 +46,14 @@ def test_format_schedule_for_jst():
 
 def test_convert_cron_utc_to_jst_label():
     assert convert_cron_utc_to_jst_label("0 0 * * *") == "毎日 09:00 JST (cron: 0 0 * * * UTC)"
+    assert convert_cron_utc_to_jst_label("0 0 15 * *") == (
+        "毎月15日 09:00 JST (cron: 0 0 15 * * UTC)"
+    )
+
+
+def test_supported_cron_accepts_monthly_schedule():
+    assert is_supported_cron("0 0 15 * *")
+    assert not is_supported_cron("0 0 32 * *")
 
 
 def test_build_conversation_key_includes_channel():

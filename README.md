@@ -97,12 +97,18 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 Slackから以下の形式でスケジュールを操作できます。cron設定はSQLiteの `tasks` を唯一の正として保存し、Codex workspaceには複製しません。
 
 ```text
-schedule cron <title> | <m h * * d> | <prompt>
+schedule cron <title> | <m h dom * dow> | <prompt>
 schedule once <title> | <ISO8601 UTC> | <prompt>
 schedule list
-schedule update <task_id> | <m h * * d>
+schedule update <task_id> | <m h dom * dow>
 schedule delete <task_id>
 schedule delete confirm <task_id>
+```
+
+月次タスクは日フィールドに `1` から `31` を指定します。たとえば毎月15日09:00 JSTは次のように登録します。
+
+```text
+schedule cron 月次リマインド | 0 0 15 * * | 月次の確認事項を知らせて
 ```
 
 既存cronタスクの時刻変更は自然文でもできます。

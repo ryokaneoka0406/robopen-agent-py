@@ -33,7 +33,7 @@ from .schedule_intent_parser import (
     ParsedScheduleUpdateIntent,
     parse_schedule_intent_with_ai,
 )
-from .scheduler import CRON_PATTERN, Scheduler
+from .scheduler import Scheduler, parse_supported_cron
 from .slack_file_receiver import build_prompt_with_slack_files
 
 
@@ -337,6 +337,9 @@ def handle_prompt(
         if source_key and memory_store.find_task_by_source_key(source_key):
             return
         parsed = parse_cron_command(trimmed.removeprefix("schedule cron "))
+        if not is_supported_cron(parsed["schedule_cron"]):
+            reply('cron形式が不正です。形式: "m h dom * dow"')
+            return
         task = memory_store.create_task(**parsed, source_key=source_key)
         scheduler.schedule(task)
         reply(build_task_registered_message(task))
@@ -379,6 +382,9 @@ def handle_prompt(
         if source_key and memory_store.find_task_by_source_key(source_key):
             return
         if ai_intent.kind == "cron":
+            if not ai_intent.schedule_cron or not is_supported_cron(ai_intent.schedule_cron):
+                reply('cron形式が不正です。形式: "m h dom * dow"')
+                return
             task = memory_store.create_task(
                 title=ai_intent.title,
                 prompt=ai_intent.prompt,
@@ -527,7 +533,7 @@ def update_cron_task_from_command(
     scheduler: Scheduler,
 ) -> None:
     if not is_supported_cron(schedule_cron):
-        reply('cron形式が不正です。形式: "m h * * d"')
+        reply('cron形式が不正です。形式: "m h dom * dow"')
         return
 
     task = memory_store.update_cron_task(task_id, schedule_cron)
@@ -547,7 +553,7 @@ def update_cron_task_from_intent(
     scheduler: Scheduler,
 ) -> None:
     if not is_supported_cron(intent.schedule_cron):
-        reply('cron形式が不正です。形式: "m h * * d"')
+        reply('cron形式が不正です。形式: "m h dom * dow"')
         return
 
     target = find_update_target(intent, memory_store.list_active_tasks())
@@ -815,15 +821,26 @@ def format_schedule_for_jst(schedule_cron: str | None, run_at: str | None) -> st
 
 
 def convert_cron_utc_to_jst_label(cron: str) -> str | None:
-    parts = cron.strip().split()
-    if len(parts) != 5:
+    fields = parse_supported_cron(cron)
+    if not fields:
         return None
-    minute, hour, day_of_month, month, day_of_week = parts
+    minute, hour, day_of_month, day_of_week = fields
     if not minute.isdigit() or not hour.isdigit():
         return None
-    base = datetime(2026, 1, 1, int(hour), int(minute), tzinfo=timezone.utc)
+    anchor_day = int(day_of_month) if day_of_month != "*" else 4
+    base = datetime(2026, 1, anchor_day, int(hour), int(minute), tzinfo=timezone.utc)
     jst = base.astimezone(ZoneInfo("Asia/Tokyo"))
-    return f"毎日 {jst:%H:%M} JST (cron: {minute} {hour} {day_of_month} {month} {day_of_week} UTC)"
+    raw = f"{minute} {hour} {day_of_month} * {day_of_week}"
+    if day_of_month != "*":
+        cadence = f"毎月{jst.day}日"
+    elif day_of_week != "*":
+        weekday = ["日", "月", "火", "水", "木", "金", "土"][
+            (int(day_of_week) + (1 if jst.date() != base.date() else 0)) % 7
+        ]
+        cadence = f"毎週{weekday}曜日"
+    else:
+        cadence = "毎日"
+    return f"{cadence} {jst:%H:%M} JST (cron: {raw} UTC)"
 
 
 def looks_like_schedule_intent(text: str) -> bool:
@@ -878,7 +895,9 @@ def is_duplicate_event(body: dict[str, Any], seen_events: dict[str, float], ttl_
 
 
 def parse_cron_command(raw: str) -> dict[str, str]:
-    title, schedule_cron, prompt = _parse_pipe_command(raw, "形式: schedule cron <title> | <m h * * d> | <prompt>")
+    title, schedule_cron, prompt = _parse_pipe_command(
+        raw, "形式: schedule cron <title> | <m h dom * dow> | <prompt>"
+    )
     return {"title": title, "schedule_cron": schedule_cron, "prompt": prompt}
 
 
@@ -890,7 +909,7 @@ def parse_one_shot_command(raw: str) -> dict[str, str]:
 def parse_schedule_update_command(raw: str) -> tuple[int, str]:
     parts = [part.strip() for part in raw.split("|", 1)]
     if len(parts) != 2 or not parts[0] or not parts[1]:
-        raise ValueError("形式: schedule update <task_id> | <m h * * d>")
+        raise ValueError("形式: schedule update <task_id> | <m h dom * dow>")
     try:
         task_id = int(parts[0])
     except ValueError as exc:
@@ -921,7 +940,7 @@ def parse_schedule_delete_confirm_command(raw: str) -> int:
 
 
 def is_supported_cron(cron: str) -> bool:
-    return bool(CRON_PATTERN.match(cron))
+    return parse_supported_cron(cron) is not None
 
 
 def _parse_pipe_command(raw: str, error_message: str) -> tuple[str, str, str]:

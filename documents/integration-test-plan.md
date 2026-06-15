@@ -163,6 +163,7 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 | IT-N-050 | 削除自然文確定 | IT-N-048後に同じ会話で `はい` または `削除して` | 対象taskだけが `cancelled` になる | MAC / LINUX |
 | IT-N-051 | 削除取消 | IT-N-048後に `やっぱりやめて` | pending状態が解除され、taskはactiveのまま維持される | MAC / LINUX |
 | IT-N-052 | 通知投稿から会話開始 | scheduled task実行結果のスレッドへ返信する | 投稿時のsession IDを使って同じCodex文脈を継続する | MAC / LINUX |
+| IT-N-053 | 月次cron登録・実行 | `schedule cron 月次リマインド \| 0 0 15 * * \| 月次確認を知らせて` を登録し15日まで待つ | `毎月15日 09:00 JST` と表示され、UTCの15日00:00に実行される | MAC / LINUX |
 
 ### 5.5 自然文スケジュール
 
@@ -175,6 +176,7 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 | IT-N-064 | ID指定自然文削除 | `#<id>を削除して` | 即時取消せず、確認メッセージを返す | MAC / LINUX |
 | IT-N-065 | タイトル指定自然文削除 | 一意なタイトルを指定して削除を依頼する | 一意なactive taskを対象に確認メッセージを返す | MAC / LINUX |
 | IT-N-066 | 通常会話へのfallback | スケジュールらしい語を含むが抽出confidenceが0.6未満の文を送る | taskを作らず通常のCodex会話として処理する | MAC / LINUX |
+| IT-N-067 | 自然文月次cron登録 | `毎月15日の9時に月次確認をリマインドして` | UTC cron `0 0 15 * *` として保存され、月次表示になる | MAC / LINUX |
 
 ### 5.6 デフォルト自発発話
 
@@ -261,7 +263,7 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 | ID | 項目 | 操作 | 期待結果 | OS |
 | --- | --- | --- | --- | --- |
 | IT-E-030 | cron形式不足 | `schedule cron title \| 0 0 * * *` | 形式エラーを返しtaskを作らない | MAC / LINUX |
-| IT-E-031 | 非対応cron | 分・時・曜日の範囲外、または6フィールドcronを指定する | 登録・更新を拒否しtask/handleを変更しない | MAC / LINUX |
+| IT-E-031 | 非対応cron | 分・時・日・曜日の範囲外、日と曜日の同時指定、または6フィールドcronを指定する | 登録・更新を拒否しtask/handleを変更しない | MAC / LINUX |
 | IT-E-032 | 不正one-shot時刻 | ISO8601でない値を登録する | 実行handleが作られないことを検知する。入力検証不足としてFAIL判定する | MAC / LINUX |
 | IT-E-033 | 過去one-shot | 過去時刻で登録する | taskは次回起動時に `done` となり実行されない | MAC / LINUX |
 | IT-E-034 | task ID非数値 | `schedule update abc ...`、`schedule delete abc` | 数値指定エラーを返しDBを変更しない | MAC / LINUX |
