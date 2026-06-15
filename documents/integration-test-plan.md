@@ -204,6 +204,7 @@ PROACTIVE_TIMEZONE=Asia/Tokyo
 | IT-N-086 | Codexマニフェスト送信 | Codexにファイル生成と送信を依頼する | `ROBOPEN_FILE_UPLOAD` 行はSlack本文から除去され、指定ファイルが送信される | MAC / LINUX |
 | IT-N-087 | 複数マニフェスト | Codexが複数の有効なマニフェスト行を返す | 本文は1回表示され、各ファイルが順番に送信される | MAC / LINUX |
 | IT-N-088 | 送信ログ | ファイル送信後にDBを照会する | `[file_uploaded]`、相対パス、取得できたfile ID/permalinkがassistant messageに残る | MAC / LINUX |
+| IT-N-089 | 定期タスクのマニフェスト送信 | scheduled taskまたはproactive taskでCodexがマニフェストを返す | マニフェスト行を除いた結果が投稿され、その投稿スレッドへファイルが送信され、同じconversationに送信ログが残る | MAC / LINUX |
 | IT-N-089 | 相対file root | `SLACK_FILE_ROOT=share` とする | `CODEX_WORKSPACE_DIR/share` として解決される | MAC / LINUX |
 
 ### 5.8 Slack添付ファイル受信
