@@ -19,7 +19,13 @@ class ScheduledHandle:
     cancel: Callable[[], None]
 
 
-CRON_PATTERN = re.compile(r"^(\*|[0-5]?\d)\s+(\*|[01]?\d|2[0-3])\s+\*\s+\*\s+(\*|[0-6])$")
+CRON_PATTERN = re.compile(
+    r"^(\*|[0-5]?\d)\s+"
+    r"(\*|[01]?\d|2[0-3])\s+"
+    r"(\*|[1-9]|[12]\d|3[01])\s+"
+    r"\*\s+"
+    r"(\*|[0-6])$"
+)
 
 
 class Scheduler:
@@ -71,17 +77,17 @@ class Scheduler:
 
     def _schedule_cron(self, task: TaskRow) -> None:
         cron = task.schedule_cron or ""
-        match = CRON_PATTERN.match(cron)
-        if not match:
-            raise ValueError(f'Unsupported cron format: {cron}. Use "m h * * d".')
+        fields = parse_supported_cron(cron)
+        if not fields:
+            raise ValueError(f'Unsupported cron format: {cron}. Use "m h dom * dow".')
 
-        minute, hour, day_of_week = match.groups()
+        minute, hour, day_of_month, day_of_week = fields
         cancelled = threading.Event()
 
         def tick_loop() -> None:
-            self._run_if_due(task, minute, hour, day_of_week)
+            self._run_if_due(task, minute, hour, day_of_month, day_of_week)
             while not cancelled.wait(60):
-                self._run_if_due(task, minute, hour, day_of_week)
+                self._run_if_due(task, minute, hour, day_of_month, day_of_week)
 
         thread = threading.Thread(target=tick_loop, daemon=True)
         thread.start()
@@ -90,12 +96,20 @@ class Scheduler:
             cancel=cancelled.set,
         )
 
-    def _run_if_due(self, task: TaskRow, minute: str, hour: str, day_of_week: str) -> None:
+    def _run_if_due(
+        self,
+        task: TaskRow,
+        minute: str,
+        hour: str,
+        day_of_month: str,
+        day_of_week: str,
+    ) -> None:
         now = datetime.now(timezone.utc)
         minute_ok = minute == "*" or now.minute == int(minute)
         hour_ok = hour == "*" or now.hour == int(hour)
+        month_day_ok = day_of_month == "*" or now.day == int(day_of_month)
         day_ok = day_of_week == "*" or _js_day_of_week(now) == int(day_of_week)
-        if minute_ok and hour_ok and day_ok:
+        if minute_ok and hour_ok and month_day_ok and day_ok:
             try:
                 self.run_task(task)
             except Exception as exc:
@@ -116,3 +130,12 @@ def _parse_iso_datetime(value: str) -> datetime | None:
 def _js_day_of_week(value: datetime) -> int:
     return (value.weekday() + 1) % 7
 
+
+def parse_supported_cron(cron: str) -> tuple[str, str, str, str] | None:
+    match = CRON_PATTERN.fullmatch(cron.strip())
+    if not match:
+        return None
+    minute, hour, day_of_month, day_of_week = match.groups()
+    if day_of_month != "*" and day_of_week != "*":
+        return None
+    return minute, hour, day_of_month, day_of_week
