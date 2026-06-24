@@ -149,6 +149,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 3. ファイル名はSlack file idと安全化した元ファイル名から生成し、パストラバーサルや上書きを避ける。
 4. Slack側の申告サイズと実ダウンロードサイズを `SLACK_INBOUND_FILE_MAX_BYTES`（未設定時20MB）で検証し、超過時はSlackへエラーを返してCodex CLIへ渡さない。
 5. Codex CLIへはSlack tokenを渡さず、保存済みファイルのworkspace相対パス、title、mimetype、size、file idを通常プロンプトへ追記する。
+6. 添付受信時に追記したファイルメタデータは、workspaceファイル送信用の自然文パス検出対象にしない。これにより、本文中の「送って」などの語と添付ファイル名が組み合わさって、受信ファイルをSlack送信命令として誤解釈することを防ぐ。
 
 ### 6.7 Healthcare Upload Receiver
 

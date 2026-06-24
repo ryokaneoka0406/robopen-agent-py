@@ -191,6 +191,7 @@ def create_app() -> App:
             slack_client=app.client,
             slack_channel=event.get("channel"),
             slack_thread_ts=thread_ts,
+            allow_natural_file_request=not bool(event.get("files")),
         )
 
     @app.message(re.compile(".*", re.DOTALL))
@@ -248,6 +249,7 @@ def create_app() -> App:
             slack_client=app.client,
             slack_channel=message.get("channel"),
             slack_thread_ts=reply_thread_ts,
+            allow_natural_file_request=not bool(message.get("files")),
         )
 
     app.client.robopen_memory_store = memory_store  # type: ignore[attr-defined]
@@ -269,6 +271,7 @@ def handle_prompt(
     slack_client: Any | None = None,
     slack_channel: str | None = None,
     slack_thread_ts: str | None = None,
+    allow_natural_file_request: bool = True,
 ) -> None:
     trimmed = (prompt or "").strip()
     if not trimmed:
@@ -443,21 +446,22 @@ def handle_prompt(
         reply(build_task_registered_message(task))
         return
 
-    natural_file_request = parse_natural_file_request(trimmed)
-    if isinstance(natural_file_request, str):
-        reply(natural_file_request)
-        return
-    if natural_file_request:
-        upload_file_request(
-            request=natural_file_request,
-            reply=reply,
-            memory_store=memory_store,
-            conversation_key=conversation_key,
-            slack_client=slack_client,
-            slack_channel=slack_channel,
-            slack_thread_ts=slack_thread_ts,
-        )
-        return
+    if allow_natural_file_request:
+        natural_file_request = parse_natural_file_request(trimmed)
+        if isinstance(natural_file_request, str):
+            reply(natural_file_request)
+            return
+        if natural_file_request:
+            upload_file_request(
+                request=natural_file_request,
+                reply=reply,
+                memory_store=memory_store,
+                conversation_key=conversation_key,
+                slack_client=slack_client,
+                slack_channel=slack_channel,
+                slack_thread_ts=slack_thread_ts,
+            )
+            return
 
     conversation = memory_store.get_or_create_conversation(conversation_key or f"local-{datetime.now().timestamp()}")
     memory_store.append_message(conversation.id, "user", trimmed)

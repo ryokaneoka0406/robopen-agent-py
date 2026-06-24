@@ -17,6 +17,7 @@
 - Codex応答末尾の `ROBOPEN_FILE_UPLOAD {"path":"...","comment":"..."}` を検出し、マニフェスト行をSlack表示から除いたうえで自動送信する。
 - 通常のDM/メンションだけでなく、scheduled taskとproactive taskのCodex応答でもマニフェストを処理し、結果投稿のスレッドへ自動送信する。
 - Slackの `file_share` subtypeを無視せず、添付ファイルを保存してworkspace相対パスをCodexプロンプトへ追記する。
+- Slack添付ファイル受信時に追記したファイルメタデータは自然文の送信対象パスとして扱わず、ユーザーからエージェントへ送ったファイルを誤ってSlack送信命令にしない。
 - root外参照、絶対パス、`../`、root外symlink、隠しファイル、ディレクトリ、サイズ超過を拒否する。
 - 成功時はSQLite `messages` に `[file_uploaded] <relative_path>` を保存する。
 
@@ -28,5 +29,6 @@
 - Codexが `ROBOPEN_FILE_UPLOAD` マニフェストを返した場合、確認なしでSlackへアップロードされる。
 - 定期実行でマニフェストが返った場合も、本文にマニフェストを残さず、結果投稿と同じconversationに送信成功ログが残る。
 - Slack DMまたは追跡済みスレッドに添付されたファイルが `workspace/inbox/slack/` 配下へ保存され、Codexがそのパスを参照できる。
+- 添付付きメッセージ本文に「送って」などが含まれていても、添付ファイル名や保存パスをworkspaceファイル送信要求として誤検知しない。
 - 不正パスとサイズ超過は送信されず、Slackへエラーメッセージが返る。
 - 既存の通常会話、スケジューラ、proactive投稿のテストが通る。
