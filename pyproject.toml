@@ -11,6 +11,7 @@ dependencies = [
 
 [project.scripts]
 robopen-agent = "robopen_agent.app:main"
+robopen-health-receiver = "robopen_agent.health_receiver:main"
 
 [dependency-groups]
 dev = [
