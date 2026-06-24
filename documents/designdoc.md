@@ -150,6 +150,15 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 4. Slack側の申告サイズと実ダウンロードサイズを `SLACK_INBOUND_FILE_MAX_BYTES`（未設定時20MB）で検証し、超過時はSlackへエラーを返してCodex CLIへ渡さない。
 5. Codex CLIへはSlack tokenを渡さず、保存済みファイルのworkspace相対パス、title、mimetype、size、file idを通常プロンプトへ追記する。
 
+### 6.7 Healthcare Upload Receiver
+
+1. iPhone Healthcare Syncアプリは、Tailscale ServeのHTTPS URLへ `POST /v1/health/imports` でdeflate済みHealthKit export JSONを送る。
+2. Raspberry Pi上の `robopen-health-receiver` はSlack/Codex本体とは別processとして `127.0.0.1:8787` にbindし、Tailscale Serveからlocalhost HTTPで受ける。
+3. receiverはbearer token hash、`Content-Type: application/vnd.robopen.health.export+json`、`Content-Encoding: deflate`、`X-Robopen-Export-Id`、`X-Robopen-Payload-Sha256` を検証する。Pi側には平文tokenを保存せず、`.env` の `HEALTH_UPLOAD_TOKEN_HASH` のみを使う。
+4. 圧縮済みpayloadのSHA-256とJSON内の `schemaVersion` / `exportId` を確認し、`CODEX_WORKSPACE_DIR/healthcare/inbox/YYYY/MM/DD/<export-id>.json.deflate` へ `0600` でatomic renameする。
+5. 同じexport idかつ同じhashの再送はduplicateとしてacceptedを返す。同じexport idでhashが異なる場合はconflictとして拒否する。
+6. receiverはHealthKit recordの意味解釈、日次集計、Slack通知、Codex起動を行わない。後続のhealthcare skillがworkspace上のinboxを処理する。
+
 ## 7. セキュリティと安全策
 
 - 削除系コマンド、外部送金、外部APIの破壊的操作はすべてapproval_guardで確認を取る。

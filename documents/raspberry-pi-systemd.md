@@ -48,6 +48,12 @@ PROACTIVE_WINDOW_START=09:00
 PROACTIVE_WINDOW_END=22:00
 PROACTIVE_MIN_GAP_MINUTES=120
 PROACTIVE_TIMEZONE=Asia/Tokyo
+HEALTH_UPLOAD_ENABLED=false
+HEALTH_UPLOAD_HOST=127.0.0.1
+HEALTH_UPLOAD_PORT=8787
+HEALTH_UPLOAD_TOKEN_HASH=<sha256-of-health-upload-token>
+HEALTH_UPLOAD_MAX_BYTES=20971520
+HEALTH_UPLOAD_MAX_UNCOMPRESSED_BYTES=104857600
 ```
 
 実際のユーザー名、`uv` のパス、repo pathを確認する。
@@ -90,6 +96,19 @@ Slackへworkspaceファイルをアップロードする場合は、Slack Appの
 mkdir -p /home/<user>/robopen-workspace/share
 ```
 
+ヘルスケアiPhoneアプリからのアップロードを受ける場合は、receiver用tokenを作成し、Pi側にはSHA-256だけを保存する。
+
+```sh
+python3 - <<'PY'
+import hashlib, secrets
+token = secrets.token_urlsafe(32)
+print("token:", token)
+print("HEALTH_UPLOAD_TOKEN_HASH=" + hashlib.sha256(token.encode()).hexdigest())
+PY
+```
+
+iPhoneアプリには `token:` の値、Piの `.env` には `HEALTH_UPLOAD_TOKEN_HASH=...` を設定する。`HEALTH_UPLOAD_ROOT` 未設定時は `CODEX_WORKSPACE_DIR/healthcare` が保存先になる。
+
 ## 3. 手動疎通確認
 
 systemd化する前に、SSHセッション上で起動してSlack疎通を確認する。
@@ -100,6 +119,19 @@ uv run robopen-agent
 ```
 
 SlackのDMまたはメンションで1往復できることを確認したら、`Ctrl+C` で停止する。
+
+ヘルスケアreceiverを使う場合は別terminalで手動疎通する。
+
+```sh
+cd /home/<user>/robopen-agent-py
+HEALTH_UPLOAD_ENABLED=true uv run robopen-health-receiver
+```
+
+別terminalからhealth checkを確認する。
+
+```sh
+curl http://127.0.0.1:8787/healthz
+```
 
 一時的な検証だけなら `tmux` で起動してもよい。ただし本番運用はsystemdを標準とする。
 
@@ -139,7 +171,57 @@ sudo systemctl status robopen-agent
 journalctl -u robopen-agent -f
 ```
 
-## 5. 運用コマンド
+## 5. Health Upload Receiver
+
+receiverはSlack/Codex本体から独立したsystemd serviceとして登録する。
+
+```sh
+sudo cp deploy/robopen-health-receiver.service.example /etc/systemd/system/robopen-health-receiver.service
+sudo nano /etc/systemd/system/robopen-health-receiver.service
+```
+
+最低限、以下を実環境に合わせる。
+
+- `User=<user>`
+- `WorkingDirectory=/home/<user>/robopen-agent-py`
+- `ExecStart=/home/<user>/.local/bin/uv run robopen-health-receiver`
+- `EnvironmentFile=/home/<user>/robopen-agent-py/.env`
+
+`.env` でreceiverを有効化する。
+
+```dotenv
+HEALTH_UPLOAD_ENABLED=true
+HEALTH_UPLOAD_HOST=127.0.0.1
+HEALTH_UPLOAD_PORT=8787
+HEALTH_UPLOAD_TOKEN_HASH=<sha256-of-health-upload-token>
+HEALTH_UPLOAD_MAX_BYTES=20971520
+HEALTH_UPLOAD_MAX_UNCOMPRESSED_BYTES=104857600
+```
+
+登録して起動する。
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable robopen-health-receiver
+sudo systemctl start robopen-health-receiver
+sudo systemctl status robopen-health-receiver
+```
+
+Tailscale Serveでtailnet内HTTPSとして公開する。
+
+```sh
+tailscale serve --https=443 http://127.0.0.1:8787
+```
+
+iPhoneアプリのEndpointは次の形式にする。
+
+```text
+https://<pi-hostname>.<tailnet-name>.ts.net/v1/health/imports
+```
+
+Tailscale Funnelは使わない。アップロードされたファイルは `CODEX_WORKSPACE_DIR/healthcare/inbox/YYYY/MM/DD/<export-id>.json.deflate` に保存される。
+
+## 6. 運用コマンド
 
 停止。
 
@@ -160,6 +242,12 @@ sudo systemctl daemon-reload
 sudo systemctl restart robopen-agent
 ```
 
+receiverの再起動。
+
+```sh
+sudo systemctl restart robopen-health-receiver
+```
+
 アプリ更新時。
 
 ```sh
@@ -169,7 +257,13 @@ uv sync
 sudo systemctl restart robopen-agent
 ```
 
-## 6. SQLiteバックアップ
+receiverのログ確認。
+
+```sh
+journalctl -u robopen-health-receiver -f
+```
+
+## 7. SQLiteバックアップ
 
 標準DBは `SQLITE_PATH=data/agent.db`。SQLiteはWALを使うため、バックアップ時はDB本体だけでなく `agent.db-wal` と `agent.db-shm` が存在する場合も同じタイミングで保全する。
 
@@ -188,7 +282,7 @@ cp /home/<user>/robopen-agent-backups/agent-YYYYMMDD.db /home/<user>/robopen-age
 sudo systemctl start robopen-agent
 ```
 
-## 7. 緊急時の代替起動
+## 8. 緊急時の代替起動
 
 systemd設定前の短時間検証は `tmux` を使える。
 

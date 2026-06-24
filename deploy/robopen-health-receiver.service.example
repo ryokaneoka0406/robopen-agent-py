@@ -1,0 +1,17 @@
+[Unit]
+Description=Robopen Health Upload Receiver
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<user>
+WorkingDirectory=/home/<user>/robopen-agent-py
+ExecStart=/home/<user>/.local/bin/uv run robopen-health-receiver
+EnvironmentFile=/home/<user>/robopen-agent-py/.env
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

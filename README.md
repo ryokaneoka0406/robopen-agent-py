@@ -25,6 +25,12 @@ SLACK_FILE_ROOT=share
 SLACK_FILE_MAX_BYTES=20971520
 SLACK_INBOUND_FILE_ROOT=inbox/slack
 SLACK_INBOUND_FILE_MAX_BYTES=20971520
+HEALTH_UPLOAD_ENABLED=false
+HEALTH_UPLOAD_HOST=127.0.0.1
+HEALTH_UPLOAD_PORT=8787
+HEALTH_UPLOAD_TOKEN_HASH=<sha256-of-health-upload-token>
+HEALTH_UPLOAD_MAX_BYTES=20971520
+HEALTH_UPLOAD_MAX_UNCOMPRESSED_BYTES=104857600
 PROACTIVE_ENABLED=false
 PROACTIVE_CHANNEL=C0123456789
 PROACTIVE_TIMES_PER_DAY=4
@@ -43,6 +49,10 @@ Slackへworkspaceファイルを送る場合は `SLACK_FILE_ROOT`、Slackから�
 どちらも未設定時は `CODEX_WORKSPACE_DIR` 配下を使い、ファイルサイズ上限は20MBです。
 `.env` にはSlack tokenなどのsecretを含むため、リポジトリへコミットしないでください。
 
+ヘルスケアiPhoneアプリからRaspberry Piへアップロードする場合は、別プロセスのreceiverを使います。
+receiverはデフォルトで `127.0.0.1:8787` にbindし、`CODEX_WORKSPACE_DIR/healthcare/inbox/YYYY/MM/DD/` へdeflate済みJSONを保存します。
+`HEALTH_UPLOAD_TOKEN_HASH` にはiPhoneアプリに入れる共有トークンのSHA-256 hex digestだけを設定してください。
+
 ## Run
 
 ```sh
@@ -53,6 +63,18 @@ uv run robopen-agent
 
 ```sh
 uv run python -m robopen_agent
+```
+
+ヘルスケアアップロードreceiver:
+
+```sh
+HEALTH_UPLOAD_ENABLED=true uv run robopen-health-receiver
+```
+
+疎通確認:
+
+```sh
+curl http://127.0.0.1:8787/healthz
 ```
 
 ## Raspberry Pi 常駐
@@ -71,9 +93,19 @@ CODEX_WORKSPACE_DIR=/home/ryopenguin2/robopen-workspace
 CODEX_SANDBOX=workspace-write
 CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=false
 CODEX_SKIP_GIT_REPO_CHECK=false
+HEALTH_UPLOAD_ENABLED=true
+HEALTH_UPLOAD_TOKEN_HASH=<sha256-of-health-upload-token>
 ```
 
 `robopen-workspace` をgit管理しない場合は `CODEX_SKIP_GIT_REPO_CHECK=true` にしてください。
+
+ヘルスケアreceiverをiPhoneから使う場合は、Pi上でreceiverをlocalhostに起動し、Tailscale Serveでtailnet内HTTPSとして公開します。
+
+```sh
+tailscale serve --https=443 http://127.0.0.1:8787
+```
+
+iPhoneアプリのEndpointは `https://<pi-hostname>.<tailnet-name>.ts.net/v1/health/imports` を指定します。Tailscale Funnelは使いません。
 
 ## Proactive Check-ins
 

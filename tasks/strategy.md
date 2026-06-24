@@ -12,6 +12,7 @@
 - 09_M2拡張_デフォルト自発発話 は M2 の既存Schedulerを使うため、M4常駐運用と並行して改善可能。
 - 11_WorkspaceファイルSlack送信 は Slack連携の拡張であり、Codex app-server移行とは独立して実装可能。ただし `files:write` scope追加と運用手順更新が必要。
 - 14_GitHub_Actionsテスト自動化 は既存機能から独立して実施できる。以後の各タスクはpull requestでCI成功を確認してからマージする。
+- 15_Healthcare_upload_receiver は Slack/Codex本体から独立した入口追加であり、M4のRaspberry Pi/systemd運用と並行可能。workspace配置だけを担当し、healthcare skillの実装とは分離する。
 
 ## 依存関係の推奨順序
 
@@ -24,6 +25,7 @@
 7. 07_横断_安全性と運用設計（全期間継続）
 8. 11_WorkspaceファイルSlack送信（M0/M1完了後なら独立実装可能）
 9. 14_GitHub_Actionsテスト自動化（既存機能から独立して実施可能）
+10. 15_Healthcare_upload_receiver（iPhone連携用の独立receiver）
 
 
 ## 進捗メモ
@@ -35,3 +37,4 @@
 - 2026-06-12: `13_統合テスト項目整備` を完了。現時点の実装を対象に、正常系・異常系・OS差分を `documents/integration-test-plan.md` へ整理した。
 - 2026-06-15: `11_WorkspaceファイルSlack送信` を補修。scheduled taskとproactive taskでもCodexのファイル送信マニフェストを処理するようにした。
 - 2026-06-15: `14_GitHub_Actionsテスト自動化` を完了。pull requestとmainへのpushでPython 3.11-3.14のpytestを実行するCIを追加した。
+- 2026-06-16: `15_Healthcare_upload_receiver` を追加・完了。iPhone Healthcare Syncからのdeflate JSONを検証し、workspaceの `healthcare/inbox` へ配置する独立receiverを実装した。
