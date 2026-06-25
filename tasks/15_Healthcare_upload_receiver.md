@@ -13,6 +13,7 @@
 ## 成果物
 - `robopen_agent/health_receiver.py`
 - `deploy/robopen-health-receiver.service.example`
+- `deploy/robopen-health-tailscale-serve.service.example`
 - `tests/test_health_receiver.py`
 - `documents/designdoc.md`
 - `documents/raspberry-pi-systemd.md`
@@ -22,4 +23,5 @@
 - `GET /healthz` がreceiver情報を返す。
 - 正常なdeflate payloadがworkspaceのhealthcare inboxへ保存される。
 - token不備、hash不一致、bad deflate、invalid JSON、schema不一致、重複conflictを拒否できる。
+- `robopen-health-tailscale-serve.service` でTailscale Serve設定を再適用できる。
 - `uv run pytest` が通る。

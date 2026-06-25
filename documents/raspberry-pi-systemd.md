@@ -207,10 +207,26 @@ sudo systemctl start robopen-health-receiver
 sudo systemctl status robopen-health-receiver
 ```
 
-Tailscale Serveでtailnet内HTTPSとして公開する。
+Tailscale Serveでtailnet内HTTPSとして公開する。手動確認だけなら次を実行する。
 
 ```sh
-tailscale serve --https=443 http://127.0.0.1:8787
+sudo tailscale serve --yes --bg --https=443 http://127.0.0.1:8787
+```
+
+常時運用では、Tailscale Serveもsystemd unitとして登録する。これによりPi再起動後に `https://<pi-hostname>.<tailnet-name>.ts.net` からreceiverへ到達できる状態を復元する。
+
+```sh
+sudo cp deploy/robopen-health-tailscale-serve.service.example /etc/systemd/system/robopen-health-tailscale-serve.service
+sudo systemctl daemon-reload
+sudo systemctl enable robopen-health-tailscale-serve
+sudo systemctl start robopen-health-tailscale-serve
+sudo systemctl status robopen-health-tailscale-serve
+```
+
+Serve設定を確認する。
+
+```sh
+sudo tailscale serve status
 ```
 
 iPhoneアプリのEndpointは次の形式にする。
@@ -220,6 +236,20 @@ https://<pi-hostname>.<tailnet-name>.ts.net/v1/health/imports
 ```
 
 Tailscale Funnelは使わない。アップロードされたファイルは `CODEX_WORKSPACE_DIR/healthcare/inbox/YYYY/MM/DD/<export-id>.json.deflate` に保存される。
+
+`listener already exists for port 443` が出る場合は、古いforegroundの `tailscale serve` が残っているか、既存のServe設定が競合している。まず次で状態を見る。
+
+```sh
+ps aux | grep '[t]ailscale serve'
+sudo tailscale serve status
+```
+
+このPiで他のTailscale Serveを使っていない場合のみ、設定を消してから入れ直す。
+
+```sh
+sudo tailscale serve reset
+sudo systemctl restart robopen-health-tailscale-serve
+```
 
 ## 6. 運用コマンド
 
@@ -248,6 +278,13 @@ receiverの再起動。
 sudo systemctl restart robopen-health-receiver
 ```
 
+Tailscale Serve設定の再適用。
+
+```sh
+sudo systemctl restart robopen-health-tailscale-serve
+sudo tailscale serve status
+```
+
 アプリ更新時。
 
 ```sh
@@ -261,6 +298,12 @@ receiverのログ確認。
 
 ```sh
 journalctl -u robopen-health-receiver -f
+```
+
+Tailscale Serve unitの状態確認。
+
+```sh
+sudo systemctl status robopen-health-tailscale-serve
 ```
 
 ## 7. SQLiteバックアップ

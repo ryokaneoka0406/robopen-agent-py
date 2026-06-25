@@ -1,0 +1,12 @@
+[Unit]
+Description=Robopen Health Upload Tailscale Serve
+After=network-online.target tailscaled.service robopen-health-receiver.service
+Wants=network-online.target tailscaled.service robopen-health-receiver.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/tailscale serve --yes --bg --https=443 http://127.0.0.1:8787
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
