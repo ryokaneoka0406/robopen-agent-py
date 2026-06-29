@@ -263,29 +263,33 @@ sudo systemctl stop robopen-agent
 
 Raspberry Pi本体の故障検知と切り分けのため、Grafana CloudのRaspberry Pi integrationを使い、Grafana Alloyからメトリクスとログを送信する。Alloyは各Raspberry Pi上に1つずつ常駐させる。
 
-送信対象は以下とする。
+送信対象はGrafana CloudのRaspberry Pi integrationが生成する公式Alloy設定に従う。
 
 - node exporter相当のOSメトリクス: CPU、load、memory、disk、network、filesystem、temperature、systemd unit stateなど。
-- journald: `robopen-agent`、`robopen-health-receiver`、`tailscaled`、kernel、systemdを含むsystem journal。
-- file logs: `/var/log/{syslog,messages,*.log}`。
+- journaldまたはOSログ: `robopen-agent`、`robopen-health-receiver`、`tailscaled`、kernel、systemdを含むRaspberry Pi本体ログ。
 
 Grafana Cloud側では、対象stackで `Connections` -> `Raspberry Pi` を開き、integrationをInstallする。`Configuration details` タブで以下を行う。
 
 1. `Select platform` はRaspberry Pi OSに合わせる。標準は `Debian` / `Arm64`。
 2. `Run Grafana Alloy` を開き、`Create a new token` でAlloy用tokenを作成する。Token nameは `robopen-raspi-alloy`、scopeは画面既定の `set:alloy-data-write`、expirationは個人運用では `No expiry` を標準にする。
-3. 生成されたtokenと、`Install and run Grafana Alloy` に表示されるHosted Metrics/LogsのIDとURLを控える。
+3. `Enable Remote Configuration` を有効にする。Fleet Managementからcollectorの疎通と設定を管理できるため、Grafana Cloud画面の `Test Alloy connection` と合わせやすい。
+4. `Install and run Grafana Alloy` に表示される `GCLOUD_*` と `ARCH` の値を控える。
 
 Raspberry Pi側の `/etc/robopen/grafana-cloud.env` には、Grafana Cloud画面で確認した値を以下の形式で設定する。
 
 ```dotenv
-GRAFANA_CLOUD_PROMETHEUS_URL=https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push
-GRAFANA_CLOUD_PROMETHEUS_USER=<metrics-instance-id>
-GRAFANA_CLOUD_LOKI_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
-GRAFANA_CLOUD_LOKI_USER=<logs-instance-id>
-GRAFANA_CLOUD_RW_TOKEN=<grafana-cloud-access-policy-token>
+GCLOUD_HOSTED_METRICS_ID=<metrics-instance-id>
+GCLOUD_HOSTED_METRICS_URL=https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push
+GCLOUD_HOSTED_LOGS_ID=<logs-instance-id>
+GCLOUD_HOSTED_LOGS_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
+GCLOUD_FM_URL=https://fleet-management-prod-XXX.grafana.net
+GCLOUD_FM_POLL_FREQUENCY=60s
+GCLOUD_FM_HOSTED_ID=<fleet-management-hosted-id>
+ARCH=arm64
+GCLOUD_RW_API_KEY=<grafana-cloud-access-policy-token>
 ```
 
-`GRAFANA_CLOUD_RW_TOKEN` はGrafana CloudのAlloy用tokenを使う。実tokenはリポジトリ、`.env`、systemd unitに書かず、`/etc/robopen/grafana-cloud.env` に `0600` で保存する。
+`GCLOUD_RW_API_KEY` はGrafana CloudのAlloy用tokenを使う。実tokenはリポジトリ、`.env`、systemd unitに書かず、`/etc/robopen/grafana-cloud.env` に `0600` で保存する。
 
 Raspberry Pi上でAlloyをインストールする。
 
@@ -294,12 +298,19 @@ cd /home/<user>/robopen-agent-py
 sudo bash deploy/install-grafana-cloud-alloy.sh
 ```
 
-初回実行で `/etc/robopen/grafana-cloud.env` が作られた場合は、Grafana Cloudの実値へ置き換えてから起動する。
+このスクリプトはGrafana Cloud画面が案内する公式Linux onboarding scriptを、`/etc/robopen/grafana-cloud.env` の `GCLOUD_*` をexportした状態で実行する。リポジトリ側では独自の `/etc/alloy/config.alloy` を管理しない。
+
+初回実行で `/etc/robopen/grafana-cloud.env` が作られた場合は、Grafana Cloudの実値へ置き換えてから再実行する。
 
 ```sh
 sudo nano /etc/robopen/grafana-cloud.env
-sudo alloy validate /etc/alloy/config.alloy
-sudo systemctl enable --now alloy
+sudo bash deploy/install-grafana-cloud-alloy.sh
+```
+
+スクリプトはログ読み取り用に `alloy` ユーザーを `adm` グループへ追加する。既にAlloyを起動済みの場合、このグループ反映のために一度再起動する。
+
+```sh
+sudo systemctl restart alloy
 ```
 
 状態確認。
@@ -329,9 +340,9 @@ robopen-agentだけを見る場合。
 障害時の切り分け。
 
 - `journalctl -u alloy -n 200 --no-pager` でAlloy自身の送信エラーを確認する。
-- `sudo systemctl cat alloy` で `/etc/robopen/grafana-cloud.env` のEnvironmentFile drop-inが読み込まれていることを確認する。
-- `sudo test -r /var/log/syslog` が失敗する場合、file logの権限またはOS差分を確認する。journald送信だけでも最低限の運用ログは追える。
-- Grafana Cloud側でデータが見えない場合、Prometheus/LokiのURL、user ID、token scope、stackのregionを再確認する。
+- `sudo systemctl cat alloy` と `sudo sed -n '1,220p' /etc/alloy/config.alloy` で、Grafana Cloudの公式onboarding scriptが生成したservice/configになっていることを確認する。
+- `failed to tail the file: permission denied` が `/var/log/*.log` で出る場合、`id alloy` で `adm` グループが含まれていることを確認し、`sudo usermod -aG adm alloy && sudo systemctl restart alloy` を実行する。journald送信だけでも最低限の運用ログは追える。
+- Grafana Cloud側でデータが見えない場合、画面の `Install and run Grafana Alloy` に表示される `GCLOUD_*`、token scope、stackのregion、Remote ConfigurationのON/OFFを再確認する。
 
 再起動。
 
