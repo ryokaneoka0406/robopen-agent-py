@@ -175,7 +175,7 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - 標準起動コマンドは `uv run robopen-agent` とする。`uv run python -m robopen_agent` は代替起動手段として扱う。
 - 本番運用では `robopen-agent.service` をsystemdに登録し、SSH切断後も常駐させる。Raspberry Pi再起動後は `systemctl enable` により自動起動する。
 - systemd unitは `EnvironmentFile` で `.env` を読み込み、Slack token、`CODEX_CMD`、`CODEX_WORKSPACE_DIR`、`CODEX_SANDBOX`、`SQLITE_PATH`、`SLACK_LOG_CHANNEL` を注入する。
-- ログはjournaldで確認する。標準の確認コマンドは `journalctl -u robopen-agent -f` とする。
+- ログはjournaldで確認する。標準の確認コマンドは `journalctl -u robopen-agent -f` とする。本番Raspberry PiではGrafana Alloyを併用し、journald、`/var/log`、node exporter相当のOSメトリクスをGrafana CloudのRaspberry Pi integrationへ送信する。
 - SQLiteは `data/agent.db` を標準配置とし、日次バックアップと復元手順を運用ドキュメントで管理する。
 - コンテナ運用は当面の標準運用から外し、必要になった場合の将来検討扱いにする。
 

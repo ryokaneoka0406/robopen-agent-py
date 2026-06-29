@@ -1,0 +1,96 @@
+logging {
+	level  = "info"
+	format = "logfmt"
+}
+
+prometheus.remote_write "metrics_service" {
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROMETHEUS_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_PROMETHEUS_USER")
+			password = sys.env("GRAFANA_CLOUD_RW_TOKEN")
+		}
+	}
+}
+
+loki.write "grafana_cloud_loki" {
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+			password = sys.env("GRAFANA_CLOUD_RW_TOKEN")
+		}
+	}
+}
+
+prometheus.exporter.unix "integrations_node_exporter" { }
+
+discovery.relabel "integrations_node_exporter" {
+	targets = prometheus.exporter.unix.integrations_node_exporter.targets
+
+	rule {
+		target_label = "instance"
+		replacement  = constants.hostname
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "integrations/raspberrypi-node"
+	}
+}
+
+prometheus.scrape "integrations_node_exporter" {
+	targets    = discovery.relabel.integrations_node_exporter.output
+	forward_to = [prometheus.remote_write.metrics_service.receiver]
+	job_name   = "integrations/node_exporter"
+}
+
+discovery.relabel "logs_integrations_integrations_node_exporter_journal_scrape" {
+	targets = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+	}
+
+	rule {
+		source_labels = ["__journal__boot_id"]
+		target_label  = "boot_id"
+	}
+
+	rule {
+		source_labels = ["__journal__transport"]
+		target_label  = "transport"
+	}
+
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+}
+
+loki.source.journal "logs_integrations_integrations_node_exporter_journal_scrape" {
+	max_age       = "24h0m0s"
+	relabel_rules = discovery.relabel.logs_integrations_integrations_node_exporter_journal_scrape.rules
+	forward_to    = [loki.write.grafana_cloud_loki.receiver]
+	labels        = {
+		instance = constants.hostname,
+		job      = "integrations/raspberrypi-node",
+	}
+}
+
+local.file_match "logs_integrations_integrations_node_exporter_direct_scrape" {
+	path_targets = [{
+		__address__ = "localhost",
+		__path__    = "/var/log/{syslog,messages,*.log}",
+		instance    = constants.hostname,
+		job         = "integrations/raspberrypi-node",
+	}]
+}
+
+loki.source.file "logs_integrations_integrations_node_exporter_direct_scrape" {
+	targets    = local.file_match.logs_integrations_integrations_node_exporter_direct_scrape.targets
+	forward_to = [loki.write.grafana_cloud_loki.receiver]
+}

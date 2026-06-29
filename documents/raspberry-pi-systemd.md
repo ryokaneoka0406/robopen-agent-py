@@ -259,6 +259,80 @@ sudo systemctl restart robopen-health-tailscale-serve
 sudo systemctl stop robopen-agent
 ```
 
+## 7. Grafana CloudへのRaspberry Piログ送信
+
+Raspberry Pi本体の故障検知と切り分けのため、Grafana CloudのRaspberry Pi integrationを使い、Grafana Alloyからメトリクスとログを送信する。Alloyは各Raspberry Pi上に1つずつ常駐させる。
+
+送信対象は以下とする。
+
+- node exporter相当のOSメトリクス: CPU、load、memory、disk、network、filesystem、temperature、systemd unit stateなど。
+- journald: `robopen-agent`、`robopen-health-receiver`、`tailscaled`、kernel、systemdを含むsystem journal。
+- file logs: `/var/log/{syslog,messages,*.log}`。
+
+Grafana Cloud側では、対象stackで `Connections` -> `Raspberry Pi` を開き、integrationをInstallする。`Configuration details` タブで以下を行う。
+
+1. `Select platform` はRaspberry Pi OSに合わせる。標準は `Debian` / `Arm64`。
+2. `Run Grafana Alloy` を開き、`Create a new token` でAlloy用tokenを作成する。Token nameは `robopen-raspi-alloy`、scopeは画面既定の `set:alloy-data-write`、expirationは個人運用では `No expiry` を標準にする。
+3. 生成されたtokenと、`Install and run Grafana Alloy` に表示されるHosted Metrics/LogsのIDとURLを控える。
+
+Raspberry Pi側の `/etc/robopen/grafana-cloud.env` には、Grafana Cloud画面で確認した値を以下の形式で設定する。
+
+```dotenv
+GRAFANA_CLOUD_PROMETHEUS_URL=https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push
+GRAFANA_CLOUD_PROMETHEUS_USER=<metrics-instance-id>
+GRAFANA_CLOUD_LOKI_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
+GRAFANA_CLOUD_LOKI_USER=<logs-instance-id>
+GRAFANA_CLOUD_RW_TOKEN=<grafana-cloud-access-policy-token>
+```
+
+`GRAFANA_CLOUD_RW_TOKEN` はGrafana CloudのAlloy用tokenを使う。実tokenはリポジトリ、`.env`、systemd unitに書かず、`/etc/robopen/grafana-cloud.env` に `0600` で保存する。
+
+Raspberry Pi上でAlloyをインストールする。
+
+```sh
+cd /home/<user>/robopen-agent-py
+sudo bash deploy/install-grafana-cloud-alloy.sh
+```
+
+初回実行で `/etc/robopen/grafana-cloud.env` が作られた場合は、Grafana Cloudの実値へ置き換えてから起動する。
+
+```sh
+sudo nano /etc/robopen/grafana-cloud.env
+sudo alloy validate /etc/alloy/config.alloy
+sudo systemctl enable --now alloy
+```
+
+状態確認。
+
+```sh
+sudo systemctl status alloy
+journalctl -u alloy -f
+```
+
+Grafana Cloud上では、Raspberry Pi integrationの以下のdashboardで確認する。
+
+- `Raspberry Pi / overview`
+- `Raspberry Pi / logs`
+
+ログ探索では、まず以下のようなLoki labelで絞る。
+
+```logql
+{job="integrations/raspberrypi-node", instance="<raspberry-pi-hostname>"}
+```
+
+robopen-agentだけを見る場合。
+
+```logql
+{job="integrations/raspberrypi-node", unit="robopen-agent.service"}
+```
+
+障害時の切り分け。
+
+- `journalctl -u alloy -n 200 --no-pager` でAlloy自身の送信エラーを確認する。
+- `sudo systemctl cat alloy` で `/etc/robopen/grafana-cloud.env` のEnvironmentFile drop-inが読み込まれていることを確認する。
+- `sudo test -r /var/log/syslog` が失敗する場合、file logの権限またはOS差分を確認する。journald送信だけでも最低限の運用ログは追える。
+- Grafana Cloud側でデータが見えない場合、Prometheus/LokiのURL、user ID、token scope、stackのregionを再確認する。
+
 再起動。
 
 ```sh
@@ -306,7 +380,7 @@ Tailscale Serve unitの状態確認。
 sudo systemctl status robopen-health-tailscale-serve
 ```
 
-## 7. SQLiteバックアップ
+## 8. SQLiteバックアップ
 
 標準DBは `SQLITE_PATH=data/agent.db`。SQLiteはWALを使うため、バックアップ時はDB本体だけでなく `agent.db-wal` と `agent.db-shm` が存在する場合も同じタイミングで保全する。
 
@@ -325,7 +399,7 @@ cp /home/<user>/robopen-agent-backups/agent-YYYYMMDD.db /home/<user>/robopen-age
 sudo systemctl start robopen-agent
 ```
 
-## 8. 緊急時の代替起動
+## 9. 緊急時の代替起動
 
 systemd設定前の短時間検証は `tmux` を使える。
 
