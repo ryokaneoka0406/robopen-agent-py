@@ -273,43 +273,37 @@ Grafana Cloud側では、対象stackで `Connections` -> `Raspberry Pi` を開�
 1. `Select platform` はRaspberry Pi OSに合わせる。標準は `Debian` / `Arm64`。
 2. `Run Grafana Alloy` を開き、`Create a new token` でAlloy用tokenを作成する。Token nameは `robopen-raspi-alloy`、scopeは画面既定の `set:alloy-data-write`、expirationは個人運用では `No expiry` を標準にする。
 3. `Enable Remote Configuration` を有効にする。Fleet Managementからcollectorの疎通と設定を管理できるため、Grafana Cloud画面の `Test Alloy connection` と合わせやすい。
-4. `Install and run Grafana Alloy` に表示される `GCLOUD_*` と `ARCH` の値を控える。
+4. `Install and run Grafana Alloy` に表示されるコマンドを `Copy to clipboard` でコピーする。
 
-Raspberry Pi側の `/etc/robopen/grafana-cloud.env` には、Grafana Cloud画面で確認した値を以下の形式で設定する。
-
-```dotenv
-GCLOUD_HOSTED_METRICS_ID=<metrics-instance-id>
-GCLOUD_HOSTED_METRICS_URL=https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push
-GCLOUD_HOSTED_LOGS_ID=<logs-instance-id>
-GCLOUD_HOSTED_LOGS_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
-GCLOUD_FM_URL=https://fleet-management-prod-XXX.grafana.net
-GCLOUD_FM_POLL_FREQUENCY=60s
-GCLOUD_FM_HOSTED_ID=<fleet-management-hosted-id>
-ARCH=arm64
-GCLOUD_RW_API_KEY=<grafana-cloud-access-policy-token>
-```
-
-`GCLOUD_RW_API_KEY` はGrafana CloudのAlloy用tokenを使う。実tokenはリポジトリ、`.env`、systemd unitに書かず、`/etc/robopen/grafana-cloud.env` に `0600` で保存する。
-
-Raspberry Pi上でAlloyをインストールする。
+Raspberry Pi側では、Grafana Cloud画面からコピーした公式コマンドをそのまま実行する。リポジトリではAlloyの独自設定ファイルや独自wrapper scriptを管理しない。公式コマンドは概ね以下の形式になるが、実際にはGrafana Cloud画面で生成されたものを使う。
 
 ```sh
-cd /home/<user>/robopen-agent-py
-sudo bash deploy/install-grafana-cloud-alloy.sh
+GCLOUD_HOSTED_METRICS_ID="<metrics-instance-id>" \
+GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push" \
+GCLOUD_HOSTED_LOGS_ID="<logs-instance-id>" \
+GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX.grafana.net/loki/api/v1/push" \
+GCLOUD_FM_URL="https://fleet-management-prod-XXX.grafana.net" \
+GCLOUD_FM_POLL_FREQUENCY="60s" \
+GCLOUD_FM_HOSTED_ID="<fleet-management-hosted-id>" \
+ARCH="arm64" \
+GCLOUD_RW_API_KEY="<grafana-cloud-access-policy-token>" \
+/bin/sh -c "$(curl -fsSL https://storage.googleapis.com/cloud-onboarding/alloy/scripts/install-linux.sh)"
 ```
 
-このスクリプトはGrafana Cloud画面が案内する公式Linux onboarding scriptを、`/etc/robopen/grafana-cloud.env` の `GCLOUD_*` をexportした状態で実行する。リポジトリ側では独自の `/etc/alloy/config.alloy` を管理しない。
+`GCLOUD_RW_API_KEY` はGrafana CloudのAlloy用tokenを使う。実tokenはリポジトリ、`.env`、systemd unit、運用ドキュメントに書かない。Grafana Cloud画面からコピーしたコマンドをRaspberry Pi上のshellで直接実行する。
 
-初回実行で `/etc/robopen/grafana-cloud.env` が作られた場合は、Grafana Cloudの実値へ置き換えてから再実行する。
+過去にrobopen独自のGrafana Alloy設定を入れたRaspberry Piでは、公式コマンド実行前に独自drop-inを消す。
 
 ```sh
-sudo nano /etc/robopen/grafana-cloud.env
-sudo bash deploy/install-grafana-cloud-alloy.sh
+sudo systemctl stop alloy || true
+sudo rm -f /etc/systemd/system/alloy.service.d/robopen-grafana-cloud.conf
+sudo systemctl daemon-reload
 ```
 
-スクリプトはログ読み取り用に `alloy` ユーザーを `adm` グループへ追加する。既にAlloyを起動済みの場合、このグループ反映のために一度再起動する。
+公式コマンド実行後、Alloyを再起動して状態を確認する。
 
 ```sh
+sudo systemctl enable --now alloy
 sudo systemctl restart alloy
 ```
 
@@ -342,7 +336,7 @@ robopen-agentだけを見る場合。
 - `journalctl -u alloy -n 200 --no-pager` でAlloy自身の送信エラーを確認する。
 - `sudo systemctl cat alloy` と `sudo sed -n '1,220p' /etc/alloy/config.alloy` で、Grafana Cloudの公式onboarding scriptが生成したservice/configになっていることを確認する。
 - `failed to tail the file: permission denied` が `/var/log/*.log` で出る場合、`id alloy` で `adm` グループが含まれていることを確認し、`sudo usermod -aG adm alloy && sudo systemctl restart alloy` を実行する。journald送信だけでも最低限の運用ログは追える。
-- Grafana Cloud側でデータが見えない場合、画面の `Install and run Grafana Alloy` に表示される `GCLOUD_*`、token scope、stackのregion、Remote ConfigurationのON/OFFを再確認する。
+- Grafana Cloud側でデータが見えない場合、画面の `Install and run Grafana Alloy` に表示される公式コマンド、token scope、stackのregion、Remote ConfigurationのON/OFFを再確認する。
 
 再起動。
 
