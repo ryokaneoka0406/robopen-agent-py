@@ -185,6 +185,8 @@ Slackスレッドの継続に必要な要約は、conversationsテーブルのsu
 - `uv sync --locked --dev` で `uv.lock` と一致する依存関係を導入し、`uv run --frozen pytest` でロックファイルを変更せずテストする。
 - `requires-python` の下限を含むPython 3.11、3.12、3.13、3.14をテスト対象とする。
 - CIはSlackやCodexの実シークレットを使用せず、GitHub Tokenの権限はリポジトリ内容の読み取りに限定する。
+- Dependabotでuv依存関係とGitHub Actionsを毎週月曜9時（JST）に確認する。minor/patch更新はecosystemごとにまとめ、major更新は影響確認のため個別pull requestとする。
+- Dependabotが同時に開くversion updateのpull requestはecosystemごとに最大5件とする。security updateはGitHubのリポジトリ設定で有効化し、version updateのスケジュールとは独立して扱う。
 
 ## 9. 段階的マイルストン
 

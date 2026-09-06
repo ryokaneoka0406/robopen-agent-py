@@ -13,6 +13,7 @@
 - 11_WorkspaceファイルSlack送信 は Slack連携の拡張であり、Codex app-server移行とは独立して実装可能。ただし `files:write` scope追加と運用手順更新が必要。
 - 14_GitHub_Actionsテスト自動化 は既存機能から独立して実施できる。以後の各タスクはpull requestでCI成功を確認してからマージする。
 - 15_Healthcare_upload_receiver は Slack/Codex本体から独立した入口追加であり、M4のRaspberry Pi/systemd運用と並行可能。workspace配置だけを担当し、healthcare skillの実装とは分離する。
+- 16_Dependabot導入 は既存機能から独立して実施できる。更新pull requestではGitHub ActionsのCI成功を確認してからマージする。
 
 ## 依存関係の推奨順序
 
@@ -26,6 +27,7 @@
 8. 11_WorkspaceファイルSlack送信（M0/M1完了後なら独立実装可能）
 9. 14_GitHub_Actionsテスト自動化（既存機能から独立して実施可能）
 10. 15_Healthcare_upload_receiver（iPhone連携用の独立receiver）
+11. 16_Dependabot導入（依存関係とGitHub Actionsの週次更新）
 
 
 ## 進捗メモ
@@ -38,3 +40,4 @@
 - 2026-06-15: `11_WorkspaceファイルSlack送信` を補修。scheduled taskとproactive taskでもCodexのファイル送信マニフェストを処理するようにした。
 - 2026-06-15: `14_GitHub_Actionsテスト自動化` を完了。pull requestとmainへのpushでPython 3.11-3.14のpytestを実行するCIを追加した。
 - 2026-06-16: `15_Healthcare_upload_receiver` を追加・完了。iPhone Healthcare Syncからのdeflate JSONを検証し、workspaceの `healthcare/inbox` へ配置する独立receiverを実装した。
+- 2026-09-07: `16_Dependabot導入` を完了。uv依存関係とGitHub Actionsを週次で確認し、minor/patch更新をecosystemごとにまとめる設定を追加した。
